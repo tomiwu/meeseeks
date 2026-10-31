@@ -16,3 +16,4 @@ project/project/
 *.trace.db
 .DS_Store
 *.class
+node_modules/
