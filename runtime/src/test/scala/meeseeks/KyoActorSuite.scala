@@ -8,12 +8,12 @@ import scala.concurrent.Future
 import scala.concurrent.duration.*
 import scala.util.{Failure, Success}
 
-/** Proves: a Kyo IO effect runs inside a Pekko actor via Future + pipeToSelf. */
+/** Proves: a Kyo Sync effect runs inside a Pekko actor via Future + pipeToSelf. */
 class KyoActorSuite extends munit.FunSuite:
 
   import KyoActorSuite.*
 
-  test("Kyo IO effect delivers result to actor via pipeToSelf") {
+  test("Kyo Sync effect delivers result to actor via pipeToSelf") {
     val kit = ActorTestKit()
     val probe = kit.createTestProbe[Int]()
 
@@ -39,9 +39,9 @@ object KyoActorSuite:
 
         Behaviors.receiveMessage:
           case DoWork =>
-            // Create a Kyo IO effect and run it via KyoStep.runToFuture.
+            // Create a Kyo Sync effect and run it via KyoStep.runToFuture.
             // The actor receives the result through pipeToSelf.
-            val effect: Int < IO = IO { 42 }
+            val effect: Int < Sync = Sync.defer(42)
             val future: Future[Int] = KyoStep.runToFuture(effect)
             ctx.pipeToSelf(future):
               case Success(n) => WorkDone(n)
