@@ -1,0 +1,14 @@
+sequenceDiagram
+  participant O as Overseer
+  participant C as Copies 1..N (default 3, no shared context)
+  participant V as Source verifier
+  participant J as Blind judge
+  participant G as Gateway
+  O->>C: same goal + rubric
+  C-->>O: answers with claims + source URLs
+  O->>V: verify each URL
+  V-->>O: supported / not supported / unreachable
+  O->>J: answers shuffled, no writer ID, no brain name
+  J-->>O: scores per rubric
+  O->>O: build result claim by claim (disputed: one targeted check)
+  O->>G: report: verified / agreed only / disputed

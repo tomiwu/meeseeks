@@ -1,0 +1,18 @@
+sequenceDiagram
+  participant T as Tomasz
+  participant O as Overseer
+  participant M as Meeseeks
+  participant W as Worker
+  M->>O: ask permit
+  alt normal
+    O-->>M: permit
+  else breaker (usage limit or disk < 10 GB)
+    O-->>M: no permit (paused until Tomasz resumes)
+  end
+  T->>O: kill (chat)
+  O->>O: stop all permits (journal)
+  O->>W: stop order
+  W->>W: stop containers + brain processes
+  W-->>O: confirm kill
+  Note over W: no server contact 60 s -> worker stops itself
+  Note over O: test: 0 containers, 0 brains, no new iteration

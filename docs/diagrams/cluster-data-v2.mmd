@@ -1,0 +1,20 @@
+flowchart LR
+  subgraph Server node
+    OV[Overseer actor]
+    MA[Meeseeks actors]
+    J[(H2 journal: events + writerId + time)]
+  end
+  subgraph Worker A - cert A
+    WA[Worker] --> CA[Podman]
+  end
+  subgraph Worker B - cert B
+    WB[Worker] --> CB[Podman]
+  end
+  MA <-- Pekko Cluster mTLS --> WA
+  MA <-- Pekko Cluster mTLS --> WB
+  WA -- results, heartbeats --> MA
+  MA -- heartbeats --> OV
+  OV -- only the server writes --> J
+  MA -- only the server writes --> J
+  J -. projection later .-> RM[(Graph read model)]
+  J -. export later .-> OB[Obsidian vault - external]

@@ -1,0 +1,32 @@
+flowchart TB
+  subgraph Ch[Chat channels]
+    GB[Grok bot - first]
+    TG[Telegram - fallback]
+  end
+  T3[T3 Code - overview - OPEN]
+  subgraph S[Server on Tomasz computer - Pekko + Kyo]
+    GW[Gateway: sender check, task check, one result]
+    OV[Overseer actor: tree, permits, kill, breaker, stalls]
+    MA[Meeseeks actors]
+    KA[Kyo step adapter]
+    J[(Pekko journal - H2 - only store)]
+  end
+  subgraph W[Workers - Pekko Cluster, mTLS cert per worker]
+    WK[Worker node]
+    PC[Podman container - task dir only]
+  end
+  BR[Brain/oracle backends: subscription, API key, local; Jev optional]
+  RM[(Graph read model - later, optional)]
+  GB --> GW
+  TG --> GW
+  GW --> OV
+  OV --> MA
+  MA --> KA
+  KA --> BR
+  MA -- step order --> WK
+  WK --> PC
+  PC -- brain process inside, credential injected --> BR
+  OV --> J
+  MA --> J
+  J -. later .-> RM
+  OV -. status .-> T3

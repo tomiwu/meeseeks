@@ -1,0 +1,23 @@
+sequenceDiagram
+  participant T as Tomasz (chat)
+  participant G as Gateway
+  participant O as Overseer
+  participant M as Meeseeks
+  participant W as Worker+Podman
+  participant C as Check container (read-only)
+  T->>G: task: goal + check type + check
+  G->>G: refuse if no check
+  G->>O: create task
+  O->>M: spawn (reuse solved work first)
+  loop until check passes
+    M->>O: ask permit
+    O-->>M: permit (or none if killed/paused)
+    M->>W: run step (Kyo: brain, Podman)
+    W-->>M: step result + heartbeat
+    M->>C: server runs check
+    C-->>M: pass / fail
+  end
+  M->>O: heartbeats (each step)
+  M->>O: result (event in journal)
+  O->>G: done
+  G->>T: one result message

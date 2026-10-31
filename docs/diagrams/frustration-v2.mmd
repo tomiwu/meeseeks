@@ -1,0 +1,19 @@
+stateDiagram-v2
+  [*] --> L1
+  L1 --> L2: time / failed check
+  L2 --> L3: time / failed check
+  L3 --> L4: time / failed check
+  L4 --> L5: time / failed check
+  L3 --> Split: split task
+  L4 --> Split
+  Split --> L3: children done, merge
+  L5 --> Stuck: report stuck to overseer
+  Stuck --> L5: keep working
+  Stuck --> Stopped: upstream stop or high-confidence oracle stop
+  L1 --> Done: check passes
+  L2 --> Done
+  L3 --> Done
+  L4 --> Done
+  L5 --> Done
+  Done --> [*]
+  Stopped --> [*]
