@@ -4,8 +4,8 @@ import com.typesafe.config.ConfigFactory
 import org.apache.pekko.actor.testkit.typed.scaladsl.ActorTestKit
 import scala.concurrent.duration.*
 
-/** Proves: one persistent actor stores events in H2 via pekko-persistence-jdbc
-  * and recovers state after an actor system restart.
+/** Proves: one persistent actor stores events in H2 via pekko-persistence-jdbc and recovers state
+  * after an actor system restart.
   */
 class PersistentActorSuite extends munit.FunSuite:
 
@@ -35,7 +35,7 @@ class PersistentActorSuite extends munit.FunSuite:
 
   test("counter persists events and recovers count after restart") {
     // Phase 1: write two increments into H2.
-    val kit1  = ActorTestKit(config)
+    val kit1 = ActorTestKit(config)
     val probe = kit1.createTestProbe[Int]()
 
     val counter = kit1.spawn(Counter("test-counter-1"), "counter1")
@@ -48,8 +48,8 @@ class PersistentActorSuite extends munit.FunSuite:
     kit1.shutdownTestKit()
 
     // Phase 2: new actor system, same DB, same persistence ID → state must recover.
-    val kit2     = ActorTestKit(config)
-    val probe2   = kit2.createTestProbe[Int]()
+    val kit2 = ActorTestKit(config)
+    val probe2 = kit2.createTestProbe[Int]()
     val counter2 = kit2.spawn(Counter("test-counter-1"), "counter1-recovered")
 
     counter2 ! Counter.GetCount(probe2.ref)

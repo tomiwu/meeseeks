@@ -23,7 +23,7 @@ object Counter:
       persistenceId = PersistenceId.ofUniqueId(id),
       emptyState = State(0),
       commandHandler = onCommand,
-      eventHandler = onEvent,
+      eventHandler = onEvent
     )
 
   private def onCommand(state: State, cmd: Command): Effect[Event, State] =

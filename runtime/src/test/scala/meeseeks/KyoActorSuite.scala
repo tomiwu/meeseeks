@@ -14,7 +14,7 @@ class KyoActorSuite extends munit.FunSuite:
   import KyoActorSuite.*
 
   test("Kyo IO effect delivers result to actor via pipeToSelf") {
-    val kit   = ActorTestKit()
+    val kit = ActorTestKit()
     val probe = kit.createTestProbe[Int]()
 
     val actor = kit.spawn(WorkerActor(probe.ref), "kyo-worker")
@@ -29,8 +29,8 @@ object KyoActorSuite:
 
   object WorkerActor:
     sealed trait Cmd
-    case object DoWork                           extends Cmd
-    private case class WorkDone(result: Int)     extends Cmd
+    case object DoWork extends Cmd
+    private case class WorkDone(result: Int) extends Cmd
     private case class WorkFailed(ex: Throwable) extends Cmd
 
     def apply(replyTo: ActorRef[Int]): Behavior[Cmd] =

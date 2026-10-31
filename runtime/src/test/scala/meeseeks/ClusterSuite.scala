@@ -44,7 +44,7 @@ class ClusterSuite extends munit.FunSuite:
     val sys2 = ActorSystem[Nothing](
       clientGuardian(received),
       "MeeseeksCluster",
-      clusterConfig(clientPort),
+      clusterConfig(clientPort)
     )
 
     try
