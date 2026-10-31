@@ -31,7 +31,7 @@ class PersistentActorSuite extends munit.FunSuite:
     }
   """)
 
-  private def config = jdbcConfig.withFallback(ConfigFactory.load())
+  private def config = jdbcConfig.withFallback(ConfigFactory.load()).resolve()
 
   test("counter persists events and recovers count after restart") {
     // Phase 1: write two increments into H2.
