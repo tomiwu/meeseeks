@@ -12,7 +12,7 @@ ThisBuild / scalacOptions ++= Seq(
   "-deprecation",
   "-unchecked",
   "-feature",
-  "-Xfatal-warnings",
+  "-Werror",
   "-Wvalue-discard",
 )
 
