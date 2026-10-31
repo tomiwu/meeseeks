@@ -1,0 +1,27 @@
+{
+  "name": "meeseeks-sandcastle",
+  "version": "1.0.0",
+  "description": "A task bot. You give it a task with a goal and a check. A Meeseeks works until the check passes, sends one result, and stops.",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "sandcastle": "npx tsx .sandcastle/main.mts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomiwu/meeseeks.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/tomiwu/meeseeks/issues"
+  },
+  "homepage": "https://github.com/tomiwu/meeseeks#readme",
+  "devDependencies": {
+    "@ai-hero/sandcastle": "^0.12.0"
+  },
+  "private": true
+}
