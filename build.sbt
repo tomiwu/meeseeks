@@ -39,6 +39,7 @@ lazy val runtime = project
       "org.apache.pekko" %% "pekko-serialization-jackson" % pekkoV,
       "org.apache.pekko" %% "pekko-persistence-jdbc" % pekkoJdbcV,
       "io.getkyo" %% "kyo-core" % kyoV,
+      "io.getkyo" %% "kyo-config" % kyoV,
       "io.getkyo" %% "kyo-scheduler-pekko" % kyoV,
       "com.h2database" % "h2" % h2V,
       "org.apache.pekko" %% "pekko-actor-testkit-typed" % pekkoV % Test,
