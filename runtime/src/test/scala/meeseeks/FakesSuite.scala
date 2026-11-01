@@ -11,7 +11,7 @@ class FakesSuite extends munit.FunSuite:
   import AllowUnsafe.embrace.danger
 
   private def run[E, T](effect: T < (Sync & Abort[E])): Result[E, T] =
-    Abort.run[E](effect).eval
+    Sync.Unsafe.evalOrThrow(Abort.run[E](effect))
 
   // ---- Brain ----
 
@@ -50,7 +50,7 @@ class FakesSuite extends munit.FunSuite:
       _ => fail("expected failure"),
       e => e match
         case _: BrainError.Unavailable => ()
-        case other                     => fail(s"wrong error type: $other"),
+        case other => fail(s"wrong error type: $other"),
       t => fail(s"unexpected panic: $t"),
     )
   }
@@ -116,7 +116,7 @@ class FakesSuite extends munit.FunSuite:
       _ => fail("expected failure"),
       e => e match
         case _: SandboxError.Unavailable => ()
-        case other                       => fail(s"wrong error type: $other"),
+        case other => fail(s"wrong error type: $other"),
       t => fail(s"unexpected panic: $t"),
     )
   }
@@ -170,7 +170,7 @@ class FakesSuite extends munit.FunSuite:
       _ => fail("expected failure"),
       e => e match
         case _: ChatError.Disconnected => ()
-        case other                     => fail(s"wrong error type: $other"),
+        case other => fail(s"wrong error type: $other"),
       t => fail(s"unexpected panic: $t"),
     )
   }
@@ -215,7 +215,7 @@ class FakesSuite extends munit.FunSuite:
       _ => fail("expected failure"),
       e => e match
         case _: WorkerError.Unreachable => ()
-        case other                      => fail(s"wrong error type: $other"),
+        case other => fail(s"wrong error type: $other"),
       t => fail(s"unexpected panic: $t"),
     )
   }
@@ -274,7 +274,7 @@ class FakesSuite extends munit.FunSuite:
       _ => fail("expected failure"),
       e => e match
         case _: OracleError.Unavailable => ()
-        case other                      => fail(s"wrong error type: $other"),
+        case other => fail(s"wrong error type: $other"),
       t => fail(s"unexpected panic: $t"),
     )
   }
