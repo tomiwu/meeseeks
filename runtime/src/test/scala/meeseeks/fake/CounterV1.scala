@@ -21,8 +21,8 @@ object CounterV1:
     )
 
   private def onCommand(
-    state: Counter.State,
-    cmd: Counter.Command
+      state: Counter.State,
+      cmd: Counter.Command
   ): Effect[IncrementedV1, Counter.State] =
     cmd match
       case Counter.Increment(ref) =>
