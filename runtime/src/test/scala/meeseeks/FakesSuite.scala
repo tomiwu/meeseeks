@@ -10,7 +10,7 @@ class FakesSuite extends munit.FunSuite:
 
   import AllowUnsafe.embrace.danger
 
-  private def run[E, T](effect: T < (Sync & Abort[E])): Result[E, T] =
+  private def run[E: ConcreteTag, T](effect: T < (Sync & Abort[E])): Result[E, T] =
     Sync.Unsafe.evalOrThrow(Abort.run[E](effect))
 
   // ---- Brain ----
