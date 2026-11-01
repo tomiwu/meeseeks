@@ -21,7 +21,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       v => assertEquals(v, "hello"),
       e => fail(s"unexpected failure: $e"),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -31,7 +31,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       _ => fail("expected failure"),
       e => assertEquals(e, BrainError.RateLimit("quota exceeded")),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -48,10 +48,11 @@ class FakesSuite extends munit.FunSuite:
     val result = run(brain.ask("prompt"))
     result.fold(
       _ => fail("expected failure"),
-      e => e match
-        case _: BrainError.Unavailable => ()
-        case other => fail(s"wrong error type: $other"),
-      t => fail(s"unexpected panic: $t"),
+      e =>
+        e match
+          case _: BrainError.Unavailable => ()
+          case other                     => fail(s"wrong error type: $other"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -61,7 +62,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       v => assertEquals(v, "delayed"),
       e => fail(s"unexpected failure: $e"),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -74,7 +75,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       v => assertEquals(v, expected),
       e => fail(s"unexpected failure: $e"),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -84,7 +85,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       _ => fail("expected failure"),
       e => assertEquals(e, SandboxError.Timeout("timed out")),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -105,7 +106,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       v => assertEquals(v, expected),
       e => fail(s"unexpected failure: $e"),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -114,10 +115,11 @@ class FakesSuite extends munit.FunSuite:
     val result = run(sandbox.run("cmd"))
     result.fold(
       _ => fail("expected failure"),
-      e => e match
-        case _: SandboxError.Unavailable => ()
-        case other => fail(s"wrong error type: $other"),
-      t => fail(s"unexpected panic: $t"),
+      e =>
+        e match
+          case _: SandboxError.Unavailable => ()
+          case other                       => fail(s"wrong error type: $other"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -130,7 +132,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       v => assertEquals(v, msg),
       e => fail(s"unexpected failure: $e"),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -140,7 +142,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       _ => fail("expected failure"),
       e => assertEquals(e, ChatError.Disconnected("channel gone")),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -168,10 +170,11 @@ class FakesSuite extends munit.FunSuite:
     val result = run(chat.receive())
     result.fold(
       _ => fail("expected failure"),
-      e => e match
-        case _: ChatError.Disconnected => ()
-        case other => fail(s"wrong error type: $other"),
-      t => fail(s"unexpected panic: $t"),
+      e =>
+        e match
+          case _: ChatError.Disconnected => ()
+          case other                     => fail(s"wrong error type: $other"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -184,7 +187,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       v => assertEquals(v, expected),
       e => fail(s"unexpected failure: $e"),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -194,7 +197,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       _ => fail("expected failure"),
       e => assertEquals(e, WorkerError.Overloaded("too busy")),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -213,10 +216,11 @@ class FakesSuite extends munit.FunSuite:
     val result = run(worker.submit(WorkItem("build", "sbt test")))
     result.fold(
       _ => fail("expected failure"),
-      e => e match
-        case _: WorkerError.Unreachable => ()
-        case other => fail(s"wrong error type: $other"),
-      t => fail(s"unexpected panic: $t"),
+      e =>
+        e match
+          case _: WorkerError.Unreachable => ()
+          case other                      => fail(s"wrong error type: $other"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -229,7 +233,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       v => assertEquals(v, OracleVerdict.Pass),
       e => fail(s"unexpected failure: $e"),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -240,7 +244,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       v => assertEquals(v, OracleVerdict.Fail("tests failed")),
       e => fail(s"unexpected failure: $e"),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -250,7 +254,7 @@ class FakesSuite extends munit.FunSuite:
     result.fold(
       _ => fail("expected failure"),
       e => assertEquals(e, OracleError.Unavailable("oracle down")),
-      t => fail(s"unexpected panic: $t"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 
@@ -263,7 +267,7 @@ class FakesSuite extends munit.FunSuite:
     r2.fold(
       v => assertEquals(v, OracleVerdict.Fail("not done")),
       e => fail(s"$e"),
-      t => fail(s"$t"),
+      t => fail(s"$t")
     )
   }
 
@@ -272,10 +276,11 @@ class FakesSuite extends munit.FunSuite:
     val result = run(oracle.judge(OracleInput("goal", "output")))
     result.fold(
       _ => fail("expected failure"),
-      e => e match
-        case _: OracleError.Unavailable => ()
-        case other => fail(s"wrong error type: $other"),
-      t => fail(s"unexpected panic: $t"),
+      e =>
+        e match
+          case _: OracleError.Unavailable => ()
+          case other                      => fail(s"wrong error type: $other"),
+      t => fail(s"unexpected panic: $t")
     )
   }
 

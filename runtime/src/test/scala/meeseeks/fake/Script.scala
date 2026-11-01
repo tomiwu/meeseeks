@@ -4,8 +4,8 @@ import scala.concurrent.duration.FiniteDuration
 
 /** One scripted step: a value or error, with an optional delay before it runs. */
 final case class Script[+E, +T](
-  response: Either[E, T],
-  delay: Option[FiniteDuration] = None,
+    response: Either[E, T],
+    delay: Option[FiniteDuration] = None
 )
 
 object Script:
