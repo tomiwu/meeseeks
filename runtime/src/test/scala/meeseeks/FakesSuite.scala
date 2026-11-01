@@ -88,6 +88,27 @@ class FakesSuite extends munit.FunSuite:
     )
   }
 
+  test("FakeSandbox returns multiple scripted results in order") {
+    val r1 = SandboxResult(0, "pass", "")
+    val r2 = SandboxResult(1, "", "error")
+    val sandbox = FakeSandbox.withResults(r1, r2)
+    val res1 = run(sandbox.run("check"))
+    val res2 = run(sandbox.run("check"))
+    res1.fold(v => assertEquals(v, r1), e => fail(s"$e"), t => fail(s"$t"))
+    res2.fold(v => assertEquals(v, r2), e => fail(s"$e"), t => fail(s"$t"))
+  }
+
+  test("FakeSandbox delay script returns result after delay") {
+    val expected = SandboxResult(0, "ok", "")
+    val sandbox = FakeSandbox.scripted(Script.after(10.millis, expected))
+    val result = run(sandbox.run("cmd"))
+    result.fold(
+      v => assertEquals(v, expected),
+      e => fail(s"unexpected failure: $e"),
+      t => fail(s"unexpected panic: $t"),
+    )
+  }
+
   test("FakeSandbox fails when queue is empty") {
     val sandbox = FakeSandbox.withResults()
     val result = run(sandbox.run("cmd"))
@@ -132,6 +153,16 @@ class FakesSuite extends munit.FunSuite:
     assertEquals(chat.sent.toList, List("hello", "world"))
   }
 
+  test("FakeChat returns multiple scripted messages in order") {
+    val m1 = ChatMessage("tomasz", "first task")
+    val m2 = ChatMessage("tomasz", "second task")
+    val chat = FakeChat.withMessages(m1, m2)
+    val r1 = run(chat.receive())
+    val r2 = run(chat.receive())
+    r1.fold(v => assertEquals(v, m1), e => fail(s"$e"), t => fail(s"$t"))
+    r2.fold(v => assertEquals(v, m2), e => fail(s"$e"), t => fail(s"$t"))
+  }
+
   test("FakeChat fails receive when queue is empty") {
     val chat = FakeChat.withMessages()
     val result = run(chat.receive())
@@ -165,6 +196,16 @@ class FakesSuite extends munit.FunSuite:
       e => assertEquals(e, WorkerError.Overloaded("too busy")),
       t => fail(s"unexpected panic: $t"),
     )
+  }
+
+  test("FakeWorker returns multiple scripted results in order") {
+    val r1 = WorkResult(0, "first pass")
+    val r2 = WorkResult(0, "second pass")
+    val worker = FakeWorker.withResults(r1, r2)
+    val res1 = run(worker.submit(WorkItem("build", "sbt test")))
+    val res2 = run(worker.submit(WorkItem("build", "sbt test")))
+    res1.fold(v => assertEquals(v, r1), e => fail(s"$e"), t => fail(s"$t"))
+    res2.fold(v => assertEquals(v, r2), e => fail(s"$e"), t => fail(s"$t"))
   }
 
   test("FakeWorker fails when queue is empty") {
@@ -210,6 +251,19 @@ class FakesSuite extends munit.FunSuite:
       _ => fail("expected failure"),
       e => assertEquals(e, OracleError.Unavailable("oracle down")),
       t => fail(s"unexpected panic: $t"),
+    )
+  }
+
+  test("FakeOracle returns multiple scripted verdicts in order") {
+    val oracle = FakeOracle.withVerdicts(OracleVerdict.Pass, OracleVerdict.Fail("not done"))
+    val input = OracleInput("goal", "output")
+    val r1 = run(oracle.judge(input))
+    val r2 = run(oracle.judge(input))
+    r1.fold(v => assertEquals(v, OracleVerdict.Pass), e => fail(s"$e"), t => fail(s"$t"))
+    r2.fold(
+      v => assertEquals(v, OracleVerdict.Fail("not done")),
+      e => fail(s"$e"),
+      t => fail(s"$t"),
     )
   }
 
