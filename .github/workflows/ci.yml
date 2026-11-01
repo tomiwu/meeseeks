@@ -61,6 +61,17 @@ jobs:
           key: ${{ runner.os }}-sbt-${{ matrix.scala }}-${{ hashFiles('**/build.sbt', '**/project/build.properties', '**/project/plugins.sbt') }}
       - run: sbt "++${{ matrix.scala }} test"
 
+  import-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: fail if runtime imports dev
+        run: |
+          if grep -r "meeseeks\.dev" runtime/src/ 2>/dev/null; then
+            echo "ERROR: runtime module must not import dev"
+            exit 1
+          fi
+
   crap:
     runs-on: ubuntu-latest
     steps:
@@ -76,10 +87,4 @@ jobs:
             ~/.sbt
             ~/.cache/coursier
           key: ${{ runner.os }}-sbt-${{ hashFiles('**/build.sbt', '**/project/build.properties', '**/project/plugins.sbt') }}
-      - name: check runtime does not import dev
-        run: |
-          if grep -r "meeseeks\.dev" runtime/src/main/scala 2>/dev/null; then
-            echo "ERROR: runtime module must not import dev"
-            exit 1
-          fi
       - run: sbt crap

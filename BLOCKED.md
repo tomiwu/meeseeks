@@ -35,7 +35,7 @@ Error: `Resource not accessible by personal access token`
 2. Set branch protection on `main`:
    ```
    gh api --method PUT repos/tomiwu/meeseeks/branches/main/protection \
-     --raw-field 'required_status_checks={"strict":true,"contexts":["format","lint","test (3.10.0)","test (3.9.0)","crap"]}' \
+     --raw-field 'required_status_checks={"strict":true,"contexts":["format","lint","test (3.10.0)","test (3.9.0)","crap","import-check"]}' \
      --raw-field 'enforce_admins=false' \
      --raw-field 'required_pull_request_reviews={"required_approving_review_count":0}' \
      --raw-field 'restrictions=null' \
