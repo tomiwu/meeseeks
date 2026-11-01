@@ -1,39 +1,35 @@
 package meeseeks
 
-import com.typesafe.config.ConfigFactory
 import meeseeks.fake.CounterV1
 import org.apache.pekko.actor.testkit.typed.scaladsl.ActorTestKit
 import scala.concurrent.duration.*
 
 /** Proves: CounterEventAdapter converts IncrementedV1 (old format) to Incremented on recovery.
   *
-  * Phase 1: a V1 actor writes IncrementedV1 events (no adapter configured). Phase 2: a new actor
-  * system recovers the same persistence ID; CounterEventAdapter converts IncrementedV1 to
-  * Incremented before the event handler runs.
+  * Phase 1: CounterV1 writes IncrementedV1 events. The adapter's toJournal is identity, so the
+  * events are stored as IncrementedV1 CBOR in H2. Phase 2: Counter recovers the same persistence
+  * ID. CounterEventAdapter.fromJournal converts IncrementedV1 to Counter.Incremented before the
+  * event handler runs.
+  *
+  * Without the adapter, phase 2 recovery fails: IncrementedV1 cannot be cast to Counter.Event.
   */
 class JournalEventAdapterSuite extends munit.FunSuite:
 
   test("event adapter converts IncrementedV1 to Incremented on recovery") {
     val pid = "journal-adapter-test-1"
 
-    // Phase 1: write old-format events with no event adapter active.
-    val cfgV1 = ConfigFactory
-      .parseString("""
-        jdbc-journal.event-adapters {}
-        jdbc-journal.event-adapter-bindings {}
-      """)
-      .withFallback(ConfigFactory.load())
-    val kit1 = ActorTestKit(cfgV1)
+    // Phase 1: write old-format events. Fresh persistence ID; no recovery in this phase.
+    val kit1 = ActorTestKit()
     val probe1 = kit1.createTestProbe[Int]()
     val v1 = kit1.spawn(CounterV1(pid), "cv1")
     v1 ! Counter.Increment(probe1.ref)
-    probe1.receiveMessage(5.seconds)
+    assertEquals(probe1.receiveMessage(5.seconds), 1)
     v1 ! Counter.Increment(probe1.ref)
     assertEquals(probe1.receiveMessage(5.seconds), 2)
     kit1.stop(v1)
     kit1.shutdownTestKit()
 
-    // Phase 2: new actor system, same H2 DB. CounterEventAdapter must convert V1 events.
+    // Phase 2: new actor system, same H2 DB. Adapter must convert IncrementedV1 on recovery.
     val kit2 = ActorTestKit()
     val probe2 = kit2.createTestProbe[Int]()
     val counter2 = kit2.spawn(Counter(pid), "c2-recovered")
