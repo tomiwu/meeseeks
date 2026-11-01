@@ -19,6 +19,7 @@ object Counter:
   final case class GetCount(replyTo: ActorRef[Int]) extends Command with CborSerializable
 
   sealed trait Event
+
   /** Current event format. Every event has writerId and timestamp set by the server. */
   final case class Incremented(amount: Int, writerId: String, timestamp: Instant)
       extends Event

@@ -11,7 +11,6 @@ import org.apache.pekko.persistence.typed.scaladsl.EventSourcedBehavior
   * Used only in JournalEventAdapterSuite to prove adapter migration.
   */
 object CounterV1:
-
   def apply(id: String): Behavior[Counter.Command] =
     EventSourcedBehavior[Counter.Command, IncrementedV1, Counter.State](
       persistenceId = PersistenceId.ofUniqueId(id),
