@@ -45,8 +45,7 @@ class PodmanSandboxSuite extends munit.FunSuite:
     val dir = Files.createTempDirectory("sandbox-unit-")
     try
       val cred = Credential("KEY", "value")
-      val config =
-        SandboxConfig(image = "alpine:latest", taskDir = dir, credential = Some(cred))
+      val config = SandboxConfig(image = "alpine:latest", taskDir = dir, credential = Some(cred))
       assertEquals(config.credential, Some(cred))
     finally
       val _ = dir.toFile.delete()
