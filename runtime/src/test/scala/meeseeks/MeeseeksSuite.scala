@@ -20,7 +20,7 @@ class MeeseeksSuite extends munit.FunSuite:
     val task = Task("build the app", TaskType.Build, "sbt test")
     val overseer = kit.spawn(Overseer("ms-single-os-1"), "ms-single-os-1")
 
-    kit.spawn(
+    val _ = kit.spawn(
       Meeseeks("ms-single-1", task, overseer, brain, oracle, resultProbe.ref),
       "ms-single-1"
     )
@@ -44,9 +44,14 @@ class MeeseeksSuite extends munit.FunSuite:
     val task = Task("build the app", TaskType.Build, "sbt test")
     val overseer = kit.spawn(Overseer("ms-retry-os-1"), "ms-retry-os-1")
 
-    kit.spawn(
+    val _ = kit.spawn(
       Meeseeks(
-        "ms-retry-1", task, overseer, brain, oracle, resultProbe.ref,
+        "ms-retry-1",
+        task,
+        overseer,
+        brain,
+        oracle,
+        resultProbe.ref,
         permitRetryDelay = 50.millis
       ),
       "ms-retry-1"
@@ -77,9 +82,14 @@ class MeeseeksSuite extends munit.FunSuite:
       "ms-hb-os-1"
     )
 
-    kit.spawn(
+    val _ = kit.spawn(
       Meeseeks(
-        "ms-hb-1", task, overseer, brain, oracle, resultProbe.ref,
+        "ms-hb-1",
+        task,
+        overseer,
+        brain,
+        oracle,
+        resultProbe.ref,
         heartbeatInterval = 50.millis
       ),
       "ms-hb-1"
@@ -104,9 +114,16 @@ class MeeseeksSuite extends munit.FunSuite:
     val overseer = kit.spawn(Overseer("ms-noperm-os-1"), "ms-noperm-os-1")
     overseer ! Overseer.Kill
 
-    kit.spawn(
-      Meeseeks("ms-noperm-1", task, overseer, brain, oracle, resultProbe.ref,
-        permitRetryDelay = 100.millis),
+    val _ = kit.spawn(
+      Meeseeks(
+        "ms-noperm-1",
+        task,
+        overseer,
+        brain,
+        oracle,
+        resultProbe.ref,
+        permitRetryDelay = 100.millis
+      ),
       "ms-noperm-1"
     )
 
@@ -137,7 +154,7 @@ class MeeseeksSuite extends munit.FunSuite:
     val resultProbe = kit.createTestProbe[String]()
 
     val overseer = kit.spawn(Overseer("ms-e2e-os-1"), "ms-e2e-os-1")
-    kit.spawn(
+    val _ = kit.spawn(
       Meeseeks("ms-e2e-1", task, overseer, brain, oracle, resultProbe.ref),
       "ms-e2e-1"
     )
