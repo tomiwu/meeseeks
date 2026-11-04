@@ -14,11 +14,11 @@ import scala.jdk.CollectionConverters.*
 /** Real Podman sandbox adapter.
   *
   * Each call to run:
-  * - starts a fresh container (--rm)
-  * - mounts only the task directory read-only at config.workDir
-  * - makes the root filesystem read-only (--read-only)
-  * - injects at most one credential via a temporary env file; the file is deleted after the
-  *   container exits
+  *   - starts a fresh container (--rm)
+  *   - mounts only the task directory read-only at config.workDir
+  *   - makes the root filesystem read-only (--read-only)
+  *   - injects at most one credential via a temporary env file; the file is deleted after the
+  *     container exits
   */
 final class PodmanSandbox(config: SandboxConfig) extends Sandbox:
 
@@ -50,8 +50,7 @@ final class PodmanSandbox(config: SandboxConfig) extends Sandbox:
             Abort.fail(SandboxError.Unavailable(s"podman start failed: ${e.getMessage}"))
           case _: InterruptedException =>
             Abort.fail(SandboxError.Timeout("container interrupted"))
-      finally
-        envFilePath.foreach(p => { val _ = Files.deleteIfExists(p) })
+      finally envFilePath.foreach(p => { val _ = Files.deleteIfExists(p) })
 
   private def buildArgs(command: String, envFile: Option[String]): List[String] =
     val envArgs = envFile.fold(List.empty[String])(path => List(s"--env-file=$path"))
@@ -61,7 +60,7 @@ final class PodmanSandbox(config: SandboxConfig) extends Sandbox:
       "--rm",
       "--read-only",
       s"--volume=${config.taskDir.toAbsolutePath}:${config.workDir}:ro",
-      s"--workdir=${config.workDir}",
+      s"--workdir=${config.workDir}"
     ) ++ envArgs ++ List(config.image) ++ splitCommand(command)
 
   private def writeEnvFile(cred: Credential): java.nio.file.Path =

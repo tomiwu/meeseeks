@@ -9,8 +9,8 @@ import meeseeks.sandbox.SandboxConfig
 
 import java.nio.file.Files
 
-/** Local integration tests for PodmanSandbox. Skipped in CI.
-  * Run locally: PODMAN_INTEGRATION=true sbt test
+/** Local integration tests for PodmanSandbox. Skipped in CI. Run locally: PODMAN_INTEGRATION=true
+  * sbt test
   */
 class PodmanSandboxIntegrationSuite extends munit.FunSuite:
 
@@ -71,7 +71,8 @@ class PodmanSandboxIntegrationSuite extends munit.FunSuite:
       val _ = Files.writeString(script, "#!/bin/sh\necho $MY_API_KEY\n")
       val _ = script.toFile.setExecutable(true)
       val cred = Credential("MY_API_KEY", "test-secret-value")
-      val config = SandboxConfig(image = "alpine:latest", taskDir = taskDir, credential = Some(cred))
+      val config =
+        SandboxConfig(image = "alpine:latest", taskDir = taskDir, credential = Some(cred))
       val sandbox = PodmanSandbox(config)
       val result = runEffect(sandbox.run("sh /workspace/check-cred.sh"))
       result.fold(

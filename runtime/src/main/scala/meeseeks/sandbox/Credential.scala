@@ -1,7 +1,7 @@
 package meeseeks.sandbox
 
-/** A single backend credential: an env var name and a secret value.
-  * The secret is never logged: toString shows only the name.
+/** A single backend credential: an env var name and a secret value. The secret is never logged:
+  * toString shows only the name.
   */
 final class Credential private (val name: String, private val secret: String):
 
