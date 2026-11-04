@@ -1,12 +1,7 @@
 package meeseeks
 
-import kyo.*
 import meeseeks.port.Brain
-import meeseeks.port.BrainError
 import meeseeks.port.Oracle
-import meeseeks.port.OracleError
-import meeseeks.port.OracleInput
-import meeseeks.port.OracleVerdict
 import org.apache.pekko.actor.typed.ActorRef
 import org.apache.pekko.actor.typed.Behavior
 import org.apache.pekko.actor.typed.scaladsl.Behaviors
@@ -41,7 +36,8 @@ object Meeseeks:
       oracle: Oracle,
       resultSink: ActorRef[String],
       permitRetryDelay: FiniteDuration = 500.millis,
-      heartbeatInterval: FiniteDuration = 5.seconds
+      heartbeatInterval: FiniteDuration = 5.seconds,
+      stepConfig: StepConfig = StepConfig()
   ): Behavior[Command] =
     Behaviors.setup { context =>
       Behaviors.withTimers { timers =>
@@ -55,29 +51,10 @@ object Meeseeks:
         overseer ! Overseer.AskPermit(id, permitAdapter)
 
         def runStep(): Unit =
-          val effect: Command < (Sync & Abort[BrainError] & Abort[OracleError]) =
-            brain.ask(task.goal).flatMap { output =>
-              oracle.judge(OracleInput(task.goal, output)).map {
-                case OracleVerdict.Pass => StepPassed(output): Command
-                case _                  => StepFailed: Command
-              }
-            }
-          val safeEffect: Command < Sync =
-            Abort.run[BrainError](Abort.run[OracleError](effect)).map { outerResult =>
-              outerResult.fold(
-                innerResult =>
-                  innerResult.fold(
-                    cmd => cmd,
-                    _ => StepFailed,
-                    _ => StepFailed
-                  ),
-                _ => StepFailed,
-                _ => StepFailed
-              )
-            }
-          context.pipeToSelf(KyoStep.runToFuture(safeEffect)) {
-            case Success(cmd) => cmd
-            case Failure(_)   => StepFailed
+          context.pipeToSelf(KyoStep.runStep(brain, oracle, task, stepConfig)) {
+            case Success(StepResult.Passed(output)) => StepPassed(output)
+            case Success(StepResult.Failed(_))      => StepFailed
+            case Failure(_)                         => StepFailed
           }
 
         Behaviors.receiveMessage {
