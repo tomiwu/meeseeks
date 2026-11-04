@@ -21,7 +21,8 @@ object Overseer:
 
   sealed trait Command
 
-  /** A Meeseeks registers itself with its control ref. The overseer records the initial heartbeat. */
+  /** A Meeseeks registers itself with its control ref. The overseer records the initial heartbeat.
+    */
   final case class RegisterMeeseeks(id: String, ref: ActorRef[MeeseeksControl]) extends Command
 
   /** A Meeseeks sends a periodic heartbeat to prove it is still running. */
