@@ -73,9 +73,9 @@ object Overseer:
   // ---- Journal state ----
 
   final case class State(
-    killed: Boolean = false,
-    breakerOpen: Boolean = false,
-    meeseeksIds: Set[String] = Set.empty
+      killed: Boolean = false,
+      breakerOpen: Boolean = false,
+      meeseeksIds: Set[String] = Set.empty
   )
 
   // ---- Factory type ----
@@ -86,10 +86,10 @@ object Overseer:
   // ---- Behavior ----
 
   def apply(
-    id: String,
-    factory: MeeseeksFactory = _ => (),
-    heartbeatTimeout: FiniteDuration = 30.seconds,
-    checkInterval: FiniteDuration = 5.seconds
+      id: String,
+      factory: MeeseeksFactory = _ => (),
+      heartbeatTimeout: FiniteDuration = 30.seconds,
+      checkInterval: FiniteDuration = 5.seconds
   ): Behavior[Command] =
     Behaviors.withTimers { timers =>
       // Ephemeral in-memory state: not in the journal.
@@ -147,9 +147,9 @@ object Overseer:
         },
         eventHandler = { (state, event) =>
           event match
-            case AllKilled => state.copy(killed = true)
-            case BreakerOpened(_) => state.copy(breakerOpen = true)
-            case BreakerClosed => state.copy(breakerOpen = false)
+            case AllKilled          => state.copy(killed = true)
+            case BreakerOpened(_)   => state.copy(breakerOpen = true)
+            case BreakerClosed      => state.copy(breakerOpen = false)
             case MeeseeksAdded(mid) => state.copy(meeseeksIds = state.meeseeksIds + mid)
         }
       )
