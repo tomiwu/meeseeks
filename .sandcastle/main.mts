@@ -14,11 +14,14 @@ const gh = (...a: string[]) => execFileSync("gh", a, { encoding: "utf8" }).trim(
 const git = (...a: string[]) => execFileSync("git", a, { encoding: "utf8" }).trim();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const finished = new Set<number>(); // issues merged in this run; never pick them again
+
 type Issue = { number: number; title: string; body: string; labels: { name: string }[] };
 
 function pickIssue(): Issue | undefined {
   const open: Issue[] = JSON.parse(gh("issue", "list", "-R", REPO, "--state", "open", "--label", "Sandcastle", "--limit", "200", "--json", "number,title,body,labels"));
   const openNums = new Set(open.map((i) => i.number));
+  open.splice(0, open.length, ...open.filter((i) => !finished.has(i.number)));
   const ready = open.filter((i) => ![...(i.body ?? "").matchAll(/Blocked by #(\d+)/gi)].some((m) => openNums.has(Number(m[1]))));
   const prio = (i: Issue) => Math.min(...i.labels.map((l) => PRIO[l.name] ?? 9));
   return ready.sort((a, b) => prio(a) - prio(b) || a.number - b.number)[0];
@@ -43,6 +46,17 @@ function failedLog(branch: string): string {
   const runId = gh("run", "list", "-R", REPO, "--branch", branch, "--status", "failure", "--limit", "1", "--json", "databaseId", "--jq", ".[0].databaseId");
   if (!runId) return "No failed run log found.";
   try { return gh("run", "view", runId, "-R", REPO, "--log-failed").slice(-20_000); } catch { return "Could not read the failed log."; }
+}
+
+// GitHub closes the issue a few seconds after the merge. Close it ourselves and wait,
+// so the next pick can never see the finished issue as open (cause of duplicate PRs).
+async function closeIssue(n: number) {
+  for (let i = 0; i < 12; i++) {
+    const state = gh("issue", "view", String(n), "-R", REPO, "--json", "state", "--jq", ".state");
+    if (state === "CLOSED") return;
+    if (i === 1) { try { gh("issue", "close", String(n), "-R", REPO, "--reason", "completed"); } catch { /* retry on next loop */ } }
+    await sleep(5_000);
+  }
 }
 
 async function agent(promptFile: string, branch: string, args: Record<string, string>) {
@@ -84,5 +98,8 @@ for (let n = 0; n < MAX_ISSUES; n++) {
     process.exit(2);
   }
   gh("pr", "merge", String(pr), "-R", REPO, "--squash", "--delete-branch"); // only after ALL checks pass
+  finished.add(issue.number);
+  await closeIssue(issue.number);
+  try { git("worktree", "prune"); git("branch", "-D", branch); } catch { /* local branch already gone */ }
   git("fetch", "origin");
 }
