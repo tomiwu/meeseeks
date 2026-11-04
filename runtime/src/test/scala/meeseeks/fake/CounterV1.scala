@@ -7,8 +7,8 @@ import org.apache.pekko.persistence.typed.PersistenceId
 import org.apache.pekko.persistence.typed.scaladsl.Effect
 import org.apache.pekko.persistence.typed.scaladsl.EventSourcedBehavior
 
-/** Test helper: simulates the old server version that persisted IncrementedV1 events.
-  * Used only in JournalEventAdapterSuite to prove adapter migration.
+/** Test helper: simulates the old server version that persisted IncrementedV1 events. Used only in
+  * JournalEventAdapterSuite to prove adapter migration.
   */
 object CounterV1:
   def apply(id: String): Behavior[Counter.Command] =
