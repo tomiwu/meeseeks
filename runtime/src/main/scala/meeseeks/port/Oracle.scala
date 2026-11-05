@@ -8,7 +8,9 @@ enum OracleVerdict:
   case Pass
   case Fail(reason: String)
   case Unsure(reason: String)
-  case Stop(reason: String)
+
+  /** Stop the Meeseeks. At frustration level 5 only a high-confidence stop is obeyed. */
+  case Stop(reason: String, highConfidence: Boolean = false)
   case Continue
 
 enum OracleError:

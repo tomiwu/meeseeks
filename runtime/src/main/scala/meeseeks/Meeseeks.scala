@@ -23,6 +23,7 @@ object Meeseeks:
   private final case class StepPassed(output: String) extends Command
   private case object StepFailed extends Command
   private final case class StepUsageLimit(reason: String) extends Command
+  private final case class StepStopped(reason: String, highConfidence: Boolean) extends Command
   private case object HeartbeatTick extends Command
   private case object RetryPermit extends Command
 
@@ -38,7 +39,9 @@ object Meeseeks:
       resultSink: ActorRef[String],
       permitRetryDelay: FiniteDuration = 500.millis,
       heartbeatInterval: FiniteDuration = 5.seconds,
-      stepConfig: StepConfig = StepConfig()
+      stepConfig: StepConfig = StepConfig(),
+      frustrationConfig: FrustrationConfig = FrustrationConfig(),
+      clock: Clock = Clock.system
   ): Behavior[Command] =
     Behaviors.setup { context =>
       Behaviors.withTimers { timers =>
@@ -46,6 +49,9 @@ object Meeseeks:
 
         val permitAdapter = context.messageAdapter[Overseer.PermitResult](PermitReply.apply)
         val controlAdapter = context.messageAdapter[Overseer.MeeseeksControl](WrappedControl.apply)
+
+        val frustration = FrustrationTracker(frustrationConfig, clock)
+        var stuckReportSent = false
 
         overseer ! Overseer.RegisterMeeseeks(id, controlAdapter)
         timers.startTimerAtFixedRate(HeartbeatTick, heartbeatInterval)
@@ -56,8 +62,17 @@ object Meeseeks:
             case Success(StepResult.Passed(output))       => StepPassed(output)
             case Success(StepResult.Failed(_))            => StepFailed
             case Success(StepResult.UsageLimitError(msg)) => StepUsageLimit(msg)
+            case Success(StepResult.OracleStop(r, hc))    => StepStopped(r, hc)
             case Failure(_)                               => StepFailed
           }
+
+        def reportStuckIfNeeded(): Unit =
+          if frustration.level == FrustrationLevel.Stuck && !stuckReportSent then
+            overseer ! Overseer.StuckReport(
+              id,
+              frustrationConfig.levelNames.getOrElse(FrustrationLevel.Stuck, "stuck")
+            )
+            stuckReportSent = true
 
         Behaviors.receiveMessage {
           case PermitReply(Overseer.Granted) =>
@@ -77,8 +92,20 @@ object Meeseeks:
             Behaviors.stopped
 
           case StepFailed =>
+            frustration.recordFailure()
+            reportStuckIfNeeded()
             overseer ! Overseer.AskPermit(id, permitAdapter)
             Behaviors.same
+
+          case StepStopped(reason, highConfidence) =>
+            val atLevelFive = frustration.level == FrustrationLevel.Stuck
+            if atLevelFive && !highConfidence then
+              // Level 5: ignore low-confidence oracle stop, keep working.
+              overseer ! Overseer.AskPermit(id, permitAdapter)
+              Behaviors.same
+            else
+              resultSink ! s"Task stopped: $reason"
+              Behaviors.stopped
 
           case StepUsageLimit(reason) =>
             overseer ! Overseer.OpenBreaker(s"usage limit: $reason")

@@ -41,6 +41,9 @@ object Overseer:
   /** Close the circuit breaker. Permits resume. Only Tomasz sends this. */
   case object ResumeBreaker extends Command
 
+  /** A Meeseeks at level 5 reports that it is stuck and cannot make progress. */
+  final case class StuckReport(meeseeksId: String, reason: String) extends Command
+
   /** Internal timer message: check for Meeseeks actors that have missed their heartbeat. */
   private case object CheckStalls extends Command
 
@@ -149,6 +152,10 @@ object Overseer:
             case ResumeBreaker =>
               if !state.breakerOpen then Effect.none
               else Effect.persist(BreakerClosed)
+
+            case StuckReport(mid, reason) =>
+              notify(s"Meeseeks $mid is stuck: $reason. Waiting for upstream stop.")
+              Effect.none
 
             case CheckStalls =>
               val now = Instant.now()

@@ -12,11 +12,12 @@ import scala.concurrent.Future
 import scala.concurrent.Promise
 import scala.concurrent.duration.*
 
-/** Result of one step: passed with output, failed with reason, or stopped by a usage limit. */
+/** Result of one step: passed, failed, usage-limit error, or oracle stop. */
 enum StepResult:
   case Passed(output: String)
   case Failed(reason: String)
   case UsageLimitError(reason: String)
+  case OracleStop(reason: String, highConfidence: Boolean)
 
 /** Step configuration: timeout applied to the whole step, and maximum retry count. */
 final case class StepConfig(
@@ -59,8 +60,9 @@ object KyoStep:
   ): StepResult < (Sync & Abort[BrainError] & Abort[OracleError]) =
     brain.ask(task.goal).flatMap { output =>
       oracle.judge(OracleInput(task.goal, output)).map {
-        case OracleVerdict.Pass => StepResult.Passed(output)
-        case other              => StepResult.Failed(other.toString)
+        case OracleVerdict.Pass        => StepResult.Passed(output)
+        case OracleVerdict.Stop(r, hc) => StepResult.OracleStop(r, hc)
+        case other                     => StepResult.Failed(other.toString)
       }
     }
 
