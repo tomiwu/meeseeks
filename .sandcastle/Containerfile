@@ -1,19 +1,36 @@
 FROM node:22-bookworm
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-  git \
-  curl \
-  jq \
-  && rm -rf /var/lib/apt/lists/*
+# Install system tools. The base image already has git, curl and ca-certificates.
+# Do not use apt: apt fetches from deb.debian.org fail in this network
+# ("500 Internal Server Error", "not signed"), on HTTP and HTTPS.
+# Get jq and the GitHub CLI as pinned release files with sha256 checks.
+ARG JQ_VERSION=1.8.2
+ARG JQ_SHA256=b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+ARG GH_VERSION=2.103.3
+ARG GH_SHA256=4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d
+RUN curl -fsSL --retry 5 -o /usr/local/bin/jq "https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64" \
+  && echo "$JQ_SHA256  /usr/local/bin/jq" | sha256sum -c - && chmod 755 /usr/local/bin/jq \
+  && curl -fsSL --retry 5 -o /tmp/gh.tgz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+  && echo "$GH_SHA256  /tmp/gh.tgz" | sha256sum -c - \
+  && tar -xzf /tmp/gh.tgz -C /tmp && install -m 755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh \
+  && rm -rf /tmp/gh.tgz /tmp/gh_${GH_VERSION}_linux_amd64
 
-# Install GitHub CLI
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-  | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-  | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-  && apt-get update && apt-get install -y gh \
-  && rm -rf /var/lib/apt/lists/*
+# Install Temurin JDK 25 and sbt from release tarballs (no apt; the apt mirror
+# fails in this network). Versions are pinned and checksums are verified.
+# CI (.github/workflows/ci.yml) uses Temurin 25 and runs `sbt scalafmtCheckAll`.
+ARG JDK_URL=https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz
+ARG JDK_SHA256=68982529869257d0ee6b824ec5aa270ff8b118bb438670da0b97ebdab178d7fb
+ARG SBT_VERSION=2.0.12
+ARG SBT_SHA256=a797e1d940260c9d6e8a0a434ff8fc3247c1b711d2cf302bae62ae243293fe55
+RUN curl -fsSL --retry 5 -o /tmp/jdk.tgz "$JDK_URL" \
+  && echo "$JDK_SHA256  /tmp/jdk.tgz" | sha256sum -c - \
+  && mkdir -p /opt/java && tar -xzf /tmp/jdk.tgz -C /opt/java --strip-components=1 \
+  && curl -fsSL --retry 5 -o /tmp/sbt.tgz "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" \
+  && echo "$SBT_SHA256  /tmp/sbt.tgz" | sha256sum -c - \
+  && tar -xzf /tmp/sbt.tgz -C /opt \
+  && rm /tmp/jdk.tgz /tmp/sbt.tgz
+ENV JAVA_HOME=/opt/java
+ENV PATH="/opt/java/bin:/opt/sbt/bin:$PATH"
 
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
