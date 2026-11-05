@@ -13,6 +13,7 @@ const PRIO: Record<string, number> = { "priority: critical": 0, "priority: high"
 const gh = (...a: string[]) => execFileSync("gh", a, { encoding: "utf8" }).trim();
 const git = (...a: string[]) => execFileSync("git", a, { encoding: "utf8" }).trim();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const REQUIRED = ["format", "lint", "test (3.10.0)", "test (3.9.0)", "crap", "import-check"];
 
 const finished = new Set<number>(); // issues merged in this run; never pick them again
 
@@ -59,6 +60,60 @@ async function closeIssue(n: number) {
   }
 }
 
+// Rebase the branch on origin/main before we create or resume its PR.
+// On a conflict, abort the rebase and stop the loop with BLOCKER.
+function rebaseOnMain(branch: string, issue: number, remote: boolean) {
+  git("fetch", "origin");
+  const start = remote ? `origin/${branch}` : branch;
+  const old = git("rev-parse", start);
+  const dir = `/tmp/sandcastle-rebase-${issue}`;
+  try { git("worktree", "remove", "--force", dir); } catch { /* no old worktree */ }
+  git("worktree", "add", "--detach", dir, start); // temp worktree, so the branch can stay checked out elsewhere
+  const wt = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8" }).trim();
+  try {
+    wt("rebase", "origin/main");
+  } catch {
+    try { wt("rebase", "--abort"); } catch { /* no rebase in progress */ }
+    git("worktree", "remove", "--force", dir);
+    console.error(`BLOCKER: issue #${issue}: rebase of ${branch} on origin/main has conflicts. Loop stops.`);
+    process.exit(2);
+  }
+  const head = wt("rev-parse", "HEAD");
+  git("worktree", "remove", "--force", dir);
+  if (remote) git("push", `--force-with-lease=${branch}:${old}`, "origin", `${head}:refs/heads/${branch}`);
+  else git("push", "origin", `${head}:refs/heads/${branch}`);
+  git("update-ref", `refs/heads/${branch}`, head);
+  try { git("branch", "--set-upstream-to", `origin/${branch}`, branch); } catch { /* fetch sets it later */ }
+  git("fetch", "origin");
+}
+
+// Wait until all required checks pass on the PR head. "fail" if one fails.
+async function waitRequired(pr: number): Promise<"pass" | "fail"> {
+  await sleep(20_000);
+  for (;;) {
+    const checks: { name: string; bucket: string }[] = JSON.parse(execFileSync("gh", ["pr", "checks", String(pr), "-R", REPO, "--json", "name,bucket"], { encoding: "utf8" }) || "[]");
+    const req = REQUIRED.map((n) => checks.find((c) => c.name === n));
+    if (req.some((c) => c && (c.bucket === "fail" || c.bucket === "cancel"))) return "fail";
+    if (req.every((c) => c && c.bucket === "pass")) return "pass";
+    await sleep(30_000);
+  }
+}
+
+// Strict branch protection needs an up-to-date branch. Update it if it is behind, wait for checks, then merge.
+async function mergeWhenCurrent(pr: number): Promise<"merged" | "fail"> {
+  for (let i = 0; i < 5; i++) {
+    const state = gh("pr", "view", String(pr), "-R", REPO, "--json", "mergeStateStatus", "--jq", ".mergeStateStatus");
+    if (state === "BEHIND") {
+      gh("pr", "update-branch", String(pr), "-R", REPO);
+      if ((await waitRequired(pr)) !== "pass") return "fail";
+      continue;
+    }
+    try { gh("pr", "merge", String(pr), "-R", REPO, "--squash", "--delete-branch"); return "merged"; }
+    catch { await sleep(15_000); } // state can lag; check again
+  }
+  return "fail";
+}
+
 async function agent(promptFile: string, branch: string, args: Record<string, string>) {
   return run({
     name: `issue-${args.ISSUE_NUMBER}`,
@@ -80,9 +135,11 @@ for (let n = 0; n < MAX_ISSUES; n++) {
   const branch = `sandcastle/issue-${issue.number}`;
   const args = { ISSUE_NUMBER: String(issue.number), ISSUE_TITLE: issue.title, BRANCH: branch };
   let pr = openPr(branch); // resume an open PR instead of a duplicate
-  if (!pr) {
+  if (pr) {
+    rebaseOnMain(branch, issue.number, true);
+  } else {
     await agent("./.sandcastle/prompt.md", branch, args);
-    git("push", "-u", "origin", branch);
+    rebaseOnMain(branch, issue.number, false);
     gh("pr", "create", "-R", REPO, "--head", branch, "--base", "main", "--title", `${issue.title} (#${issue.number})`, "--body", `Closes #${issue.number}\n\nMade by the Sandcastle loop.`);
     pr = openPr(branch)!;
   }
@@ -97,7 +154,11 @@ for (let n = 0; n < MAX_ISSUES; n++) {
     console.error(`BLOCKER: issue #${issue.number}, PR #${pr}. Loop stops.`);
     process.exit(2);
   }
-  gh("pr", "merge", String(pr), "-R", REPO, "--squash", "--delete-branch"); // only after ALL checks pass
+  // Merge only after ALL checks pass, on a branch that is up to date with main.
+  if ((await mergeWhenCurrent(pr)) !== "merged") {
+    console.error(`BLOCKER: issue #${issue.number}, PR #${pr}: merge failed after update-branch. Loop stops.`);
+    process.exit(2);
+  }
   finished.add(issue.number);
   await closeIssue(issue.number);
   try { git("worktree", "prune"); git("branch", "-D", branch); } catch { /* local branch already gone */ }
