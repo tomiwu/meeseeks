@@ -12,9 +12,9 @@ import scala.concurrent.duration.*
 
 /** One persistent overseer actor.
   *
-  * Holds the permit gate, kill state, and circuit breaker as journal state. Detects stalls with
-  * heartbeats. Kills a stalled Meeseeks and restarts it. All gate state survives a restart because
-  * it lives in the journal.
+  * Holds the permit gate, kill state, circuit breaker, Meeseeks tree, and solved-work cache as
+  * journal state. Detects stalls with heartbeats. Kills a stalled Meeseeks and restarts it. All
+  * gate state survives a restart because it lives in the journal.
   */
 object Overseer:
 
@@ -25,6 +25,10 @@ object Overseer:
   /** A Meeseeks registers itself with its control ref. The overseer records the initial heartbeat.
     */
   final case class RegisterMeeseeks(id: String, ref: ActorRef[MeeseeksControl]) extends Command
+
+  /** A child Meeseeks registers itself with its parent ID. */
+  final case class RegisterChild(childId: String, parentId: String, ref: ActorRef[MeeseeksControl])
+      extends Command
 
   /** A Meeseeks sends a periodic heartbeat to prove it is still running. */
   final case class Heartbeat(meeseeksId: String) extends Command
@@ -44,6 +48,22 @@ object Overseer:
   /** A Meeseeks at level 5 reports that it is stuck and cannot make progress. */
   final case class StuckReport(meeseeksId: String, reason: String) extends Command
 
+  /** A child reports that one of its steps succeeded. Routes ChildSucceeded to the parent. */
+  final case class ChildDone(childId: String, parentId: String, result: String) extends Command
+
+  /** A child reports that one of its steps failed. Routes ChildFailed to the parent. */
+  final case class ChildFail(childId: String, parentId: String) extends Command
+
+  /** Query whether this goal has already been solved. */
+  final case class QuerySolvedWork(goal: String, replyTo: ActorRef[SolvedWorkResult])
+      extends Command
+
+  /** Record a solved result so future Meeseeks can reuse it. */
+  final case class RecordSolvedWork(goal: String, result: String) extends Command
+
+  /** Return a snapshot of the Meeseeks tree for display. */
+  final case class GetTreeView(replyTo: ActorRef[TreeView]) extends Command
+
   /** Internal timer message: check for Meeseeks actors that have missed their heartbeat. */
   private case object CheckStalls extends Command
 
@@ -56,10 +76,27 @@ object Overseer:
   case object Granted extends PermitResult
   case object Denied extends PermitResult
 
-  // ---- Control message sent to a Meeseeks by the overseer ----
+  // ---- Solved-work query result ----
+
+  sealed trait SolvedWorkResult extends CborSerializable
+  final case class SolvedWork(result: String) extends SolvedWorkResult
+  case object NoSolvedWork extends SolvedWorkResult
+
+  // ---- Tree view ----
+
+  final case class TreeView(meeseeksIds: Set[String], childParent: Map[String, String])
+      extends CborSerializable
+
+  // ---- Control messages sent to a Meeseeks by the overseer ----
 
   sealed trait MeeseeksControl extends CborSerializable
   case object StopMeeseeks extends MeeseeksControl
+
+  /** Sent to a parent when one of its children finishes successfully. */
+  final case class ChildSucceeded(childId: String, result: String) extends MeeseeksControl
+
+  /** Sent to a parent when one of its children fails a step. */
+  final case class ChildFailed(childId: String) extends MeeseeksControl
 
   // ---- Journal events ----
 
@@ -77,12 +114,20 @@ object Overseer:
   /** A Meeseeks was added to the tree for the first time. */
   final case class MeeseeksAdded(id: String) extends Event
 
+  /** A child Meeseeks was added to the tree with its parent reference. */
+  final case class ChildAdded(childId: String, parentId: String) extends Event
+
+  /** A solved result was recorded for future reuse. */
+  final case class WorkSolved(goal: String, result: String) extends Event
+
   // ---- Journal state ----
 
   final case class State(
       killed: Boolean = false,
       breakerOpen: Boolean = false,
-      meeseeksIds: Set[String] = Set.empty
+      meeseeksIds: Set[String] = Set.empty,
+      childParent: Map[String, String] = Map.empty,
+      solvedWork: Map[String, String] = Map.empty
   )
 
   // ---- Factory type ----
@@ -125,6 +170,12 @@ object Overseer:
               if state.meeseeksIds.contains(mid) then Effect.none
               else Effect.persist(MeeseeksAdded(mid))
 
+            case RegisterChild(cid, pid, ref) =>
+              refs = refs.updated(cid, ref)
+              heartbeats = heartbeats.updated(cid, Instant.now())
+              if state.childParent.contains(cid) then Effect.none
+              else Effect.persist(ChildAdded(cid, pid))
+
             case Heartbeat(mid) =>
               heartbeats = heartbeats.updated(mid, Instant.now())
               Effect.none
@@ -157,6 +208,28 @@ object Overseer:
               notify(s"Meeseeks $mid is stuck: $reason. Waiting for upstream stop.")
               Effect.none
 
+            case ChildDone(cid, pid, result) =>
+              refs.get(pid).foreach(_ ! ChildSucceeded(cid, result))
+              Effect.none
+
+            case ChildFail(cid, pid) =>
+              refs.get(pid).foreach(_ ! ChildFailed(cid))
+              Effect.none
+
+            case QuerySolvedWork(goal, replyTo) =>
+              replyTo ! state.solvedWork
+                .get(goal)
+                .fold[SolvedWorkResult](NoSolvedWork)(SolvedWork.apply)
+              Effect.none
+
+            case RecordSolvedWork(goal, result) =>
+              if state.solvedWork.contains(goal) then Effect.none
+              else Effect.persist(WorkSolved(goal, result))
+
+            case GetTreeView(replyTo) =>
+              replyTo ! TreeView(state.meeseeksIds, state.childParent)
+              Effect.none
+
             case CheckStalls =>
               val now = Instant.now()
               val stalled = heartbeats.filter { case (_, lastHb) =>
@@ -184,10 +257,18 @@ object Overseer:
         },
         eventHandler = { (state, event) =>
           event match
-            case AllKilled          => state.copy(killed = true)
-            case BreakerOpened(_)   => state.copy(breakerOpen = true)
-            case BreakerClosed      => state.copy(breakerOpen = false)
-            case MeeseeksAdded(mid) => state.copy(meeseeksIds = state.meeseeksIds + mid)
+            case AllKilled        => state.copy(killed = true)
+            case BreakerOpened(_) => state.copy(breakerOpen = true)
+            case BreakerClosed    => state.copy(breakerOpen = false)
+            case MeeseeksAdded(mid) =>
+              state.copy(meeseeksIds = state.meeseeksIds + mid)
+            case ChildAdded(cid, pid) =>
+              state.copy(
+                childParent = state.childParent + (cid -> pid),
+                meeseeksIds = state.meeseeksIds + cid
+              )
+            case WorkSolved(goal, result) =>
+              state.copy(solvedWork = state.solvedWork + (goal -> result))
         }
       )
     }
