@@ -4,12 +4,13 @@ import { run, claudeCode } from "@ai-hero/sandcastle";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
+import { selectIssue, PRIO, type Issue } from "./pick.mts";
 
 const REPO = "tomiwu/meeseeks";
 const MODEL = "claude-sonnet-4-6"; // latest Sonnet known to Sandcastle 0.12.0
 const MAX_FIX_TRIES = 3;
 const MAX_ISSUES = Number(process.env.SANDCASTLE_MAX_ISSUES ?? "25");
-const PRIO: Record<string, number> = { "priority: critical": 0, "priority: high": 1, "priority: medium": 2, "priority: low": 3 };
+const DRY_RUN = Boolean(process.env.SANDCASTLE_DRY_RUN);
 
 // 60 s timeout, so a network stall cannot hang the loop.
 const gh = (...a: string[]) => execFileSync("gh", a, { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" }).trim();
@@ -19,15 +20,9 @@ const REQUIRED = ["format", "lint", "test (3.10.0)", "test (3.9.0)", "crap", "im
 
 const finished = new Set<number>(); // issues merged in this run; never pick them again
 
-type Issue = { number: number; title: string; body: string; labels: { name: string }[] };
-
 function pickIssue(): Issue | undefined {
   const open: Issue[] = JSON.parse(gh("issue", "list", "-R", REPO, "--state", "open", "--label", "Sandcastle", "--limit", "200", "--json", "number,title,body,labels"));
-  const openNums = new Set(open.map((i) => i.number));
-  open.splice(0, open.length, ...open.filter((i) => !finished.has(i.number)));
-  const ready = open.filter((i) => ![...(i.body ?? "").matchAll(/Blocked by #(\d+)/gi)].some((m) => openNums.has(Number(m[1]))));
-  const prio = (i: Issue) => Math.min(...i.labels.map((l) => PRIO[l.name] ?? 9));
-  return ready.sort((a, b) => prio(a) - prio(b) || a.number - b.number)[0];
+  return selectIssue(open, finished);
 }
 
 function openPr(branch: string): number | undefined {
@@ -205,6 +200,11 @@ async function agent(promptFile: string, branch: string, args: Record<string, st
 }
 
 git("fetch", "origin");
+if (DRY_RUN) {
+  const issue = pickIssue();
+  console.log(issue ? `dry-run: next issue #${issue.number}: ${issue.title}` : "dry-run: no unblocked Sandcastle issue");
+  process.exit(0);
+}
 for (let n = 0; n < MAX_ISSUES; n++) {
   const issue = pickIssue();
   if (!issue) { console.log("No unblocked Sandcastle issue. Done."); break; }
