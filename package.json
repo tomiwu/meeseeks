@@ -6,7 +6,8 @@
     "doc": "docs"
   },
   "scripts": {
-    "sandcastle": "npx tsx .sandcastle/main.mts"
+    "sandcastle": "npx tsx .sandcastle/main.mts",
+    "test:pick": "npx tsx .sandcastle/pick.test.mts"
   },
   "repository": {
     "type": "git",
