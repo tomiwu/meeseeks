@@ -7,10 +7,12 @@ import meeseeks.build.CheckRunner
 import scala.collection.mutable
 
 /** In-memory CheckRunner fake that returns scripted results. Dequeues one step per call. */
-final class FakeCheckRunner(queue: mutable.Queue[Script[CheckError, CheckResult]]) extends CheckRunner:
+final class FakeCheckRunner(queue: mutable.Queue[Script[CheckError, CheckResult]])
+    extends CheckRunner:
   override def run(command: String): CheckResult < (Sync & Abort[CheckError]) =
     Sync.defer:
-      if queue.isEmpty then Abort.fail(CheckError.SandboxUnavailable("no scripted responses remain"))
+      if queue.isEmpty then
+        Abort.fail(CheckError.SandboxUnavailable("no scripted responses remain"))
       else
         val step = queue.dequeue()
         step.delay.foreach(d => Thread.sleep(d.toMillis))

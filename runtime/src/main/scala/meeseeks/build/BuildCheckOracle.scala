@@ -8,8 +8,8 @@ import meeseeks.port.OracleVerdict
 
 /** Oracle for build tasks.
   *
-  * 1. Rejects any change to test files by the code writer (AT5).
-  * 2. Runs the check command in an external check runner (AT4).
+  *   1. Rejects any change to test files by the code writer (AT5). 2. Runs the check command in an
+  *      external check runner (AT4).
   *
   * Self-review is structurally impossible: judge uses only CheckRunner, never Brain.
   */
@@ -20,22 +20,24 @@ final class BuildCheckOracle(
 ) extends Oracle:
 
   override def judge(input: OracleInput): OracleVerdict < (Sync & Abort[OracleError]) =
-    Sync.defer {
-      guard.detectChange()
-    }.flatMap {
-      case Some(reason) =>
-        OracleVerdict.Fail(s"test file changed by code writer: $reason")
-      case None =>
-        Abort.run[CheckError](runner.run(checkCommand)).flatMap { r =>
-          r.fold(
-            {
-              case CheckResult.Pass    => OracleVerdict.Pass
-              case CheckResult.Fail(s) => OracleVerdict.Fail(s)
-            },
-            e => Abort.fail(OracleError.Unavailable(e.toString)),
-            t => Abort.fail(OracleError.Unavailable(t.getMessage))
-          )
-        }
-    }
+    Sync
+      .defer {
+        guard.detectChange()
+      }
+      .flatMap {
+        case Some(reason) =>
+          OracleVerdict.Fail(s"test file changed by code writer: $reason")
+        case None =>
+          Abort.run[CheckError](runner.run(checkCommand)).flatMap { r =>
+            r.fold(
+              {
+                case CheckResult.Pass    => OracleVerdict.Pass
+                case CheckResult.Fail(s) => OracleVerdict.Fail(s)
+              },
+              e => Abort.fail(OracleError.Unavailable(e.toString)),
+              t => Abort.fail(OracleError.Unavailable(t.getMessage))
+            )
+          }
+      }
 
 end BuildCheckOracle
