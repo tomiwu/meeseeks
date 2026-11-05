@@ -17,3 +17,4 @@ project/project/
 .DS_Store
 *.class
 node_modules/
+data/
