@@ -13,9 +13,13 @@ import scala.util.Success
   *
   * Runs a permit loop: register with the overseer, ask for a permit, run one brain step, check the
   * oracle verdict. Stops when the oracle passes, sending one result message to resultSink. Sends
-  * heartbeats so the overseer can detect stalls.
+  * heartbeats so the overseer can detect stalls. At higher frustration levels splits the task into
+  * children and merges their results.
   */
 object Meeseeks:
+
+  /** Creates a child Meeseeks actor. Called by the parent when it splits its task. */
+  type ChildFactory = (String, Task, String) => Unit
 
   sealed trait Command
 
@@ -26,6 +30,7 @@ object Meeseeks:
   private final case class StepStopped(reason: String, highConfidence: Boolean) extends Command
   private case object HeartbeatTick extends Command
   private case object RetryPermit extends Command
+  private final case class SolvedWorkReply(result: Overseer.SolvedWorkResult) extends Command
 
   /** Overseer control messages routed through a message adapter. */
   final case class WrappedControl(msg: Overseer.MeeseeksControl) extends Command
@@ -41,7 +46,11 @@ object Meeseeks:
       heartbeatInterval: FiniteDuration = 5.seconds,
       stepConfig: StepConfig = StepConfig(),
       frustrationConfig: FrustrationConfig = FrustrationConfig(),
-      clock: Clock = Clock.system
+      clock: Clock = Clock.system,
+      childFactory: Option[ChildFactory] = None,
+      parentId: Option[String] = None,
+      splitAtLevel: FrustrationLevel = FrustrationLevel.Frustrated,
+      childCount: Int = 2
   ): Behavior[Command] =
     Behaviors.setup { context =>
       Behaviors.withTimers { timers =>
@@ -49,13 +58,26 @@ object Meeseeks:
 
         val permitAdapter = context.messageAdapter[Overseer.PermitResult](PermitReply.apply)
         val controlAdapter = context.messageAdapter[Overseer.MeeseeksControl](WrappedControl.apply)
+        val solvedWorkAdapter =
+          context.messageAdapter[Overseer.SolvedWorkResult](SolvedWorkReply.apply)
 
         val frustration = FrustrationTracker(frustrationConfig, clock)
         var stuckReportSent = false
 
-        overseer ! Overseer.RegisterMeeseeks(id, controlAdapter)
+        // Child tracking for split mode.
+        var pendingChildren: Set[String] = Set.empty
+        var childResults: List[String] = List.empty
+        var awaitingChildren: Boolean = false
+
+        // Register with overseer.
+        parentId match
+          case Some(pid) => overseer ! Overseer.RegisterChild(id, pid, controlAdapter)
+          case None      => overseer ! Overseer.RegisterMeeseeks(id, controlAdapter)
+
         timers.startTimerAtFixedRate(HeartbeatTick, heartbeatInterval)
-        overseer ! Overseer.AskPermit(id, permitAdapter)
+
+        // Query solved work before asking for the first permit.
+        overseer ! Overseer.QuerySolvedWork(task.goal, solvedWorkAdapter)
 
         def runStep(): Unit =
           context.pipeToSelf(KyoStep.runStep(brain, oracle, task, stepConfig)) {
@@ -74,7 +96,39 @@ object Meeseeks:
             )
             stuckReportSent = true
 
+        def shouldSplit(): Boolean =
+          frustration.level.value >= splitAtLevel.value && childFactory.isDefined && !awaitingChildren
+
+        def spawnChildren(): Unit =
+          val ids = (1 to childCount).map(i => s"$id-child-$i").toSet
+          pendingChildren = ids
+          awaitingChildren = true
+          childResults = List.empty
+          ids.foreach { cid =>
+            childFactory.foreach(_(cid, task, id))
+          }
+
+        def reportSuccess(output: String): Behavior[Command] =
+          parentId match
+            case Some(pid) =>
+              overseer ! Overseer.ChildDone(id, pid, output)
+              overseer ! Overseer.RecordSolvedWork(task.goal, output)
+            case None =>
+              resultSink ! s"Task complete: $output"
+              overseer ! Overseer.RecordSolvedWork(task.goal, output)
+          Behaviors.stopped
+
         Behaviors.receiveMessage {
+          case SolvedWorkReply(Overseer.SolvedWork(result)) =>
+            // Reuse previously solved work; skip running any steps.
+            resultSink ! s"Task complete (reused): $result"
+            Behaviors.stopped
+
+          case SolvedWorkReply(Overseer.NoSolvedWork) =>
+            // No prior result; begin the permit loop.
+            overseer ! Overseer.AskPermit(id, permitAdapter)
+            Behaviors.same
+
           case PermitReply(Overseer.Granted) =>
             runStep()
             Behaviors.same
@@ -88,13 +142,15 @@ object Meeseeks:
             Behaviors.same
 
           case StepPassed(output) =>
-            resultSink ! s"Task complete: $output"
-            Behaviors.stopped
+            reportSuccess(output)
 
           case StepFailed =>
             frustration.recordFailure()
             reportStuckIfNeeded()
-            overseer ! Overseer.AskPermit(id, permitAdapter)
+            // Notify parent if this is a child.
+            parentId.foreach { pid => overseer ! Overseer.ChildFail(id, pid) }
+            if shouldSplit() then spawnChildren()
+            else if !awaitingChildren then overseer ! Overseer.AskPermit(id, permitAdapter)
             Behaviors.same
 
           case StepStopped(reason, highConfidence) =>
@@ -104,7 +160,11 @@ object Meeseeks:
               overseer ! Overseer.AskPermit(id, permitAdapter)
               Behaviors.same
             else
-              resultSink ! s"Task stopped: $reason"
+              parentId match
+                case Some(pid) =>
+                  overseer ! Overseer.ChildFail(id, pid)
+                case None =>
+                  resultSink ! s"Task stopped: $reason"
               Behaviors.stopped
 
           case StepUsageLimit(reason) =>
@@ -118,6 +178,27 @@ object Meeseeks:
 
           case WrappedControl(Overseer.StopMeeseeks) =>
             Behaviors.stopped
+
+          case WrappedControl(Overseer.ChildSucceeded(cid, result)) =>
+            if pendingChildren.contains(cid) then
+              pendingChildren = pendingChildren - cid
+              childResults = result :: childResults
+              if pendingChildren.isEmpty then
+                val merged = childResults.reverse.mkString("\n")
+                reportSuccess(merged)
+              else Behaviors.same
+            else Behaviors.same
+
+          case WrappedControl(Overseer.ChildFailed(cid)) =>
+            if pendingChildren.contains(cid) then
+              pendingChildren = pendingChildren - cid
+              frustration.recordFailure()
+              reportStuckIfNeeded()
+              if pendingChildren.isEmpty then
+                awaitingChildren = false
+                if shouldSplit() then spawnChildren()
+                else overseer ! Overseer.AskPermit(id, permitAdapter)
+            Behaviors.same
         }
       }
     }
