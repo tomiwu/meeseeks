@@ -11,9 +11,8 @@ import meeseeks.sandbox.Credential
 
 /** Tests for pluggable backend selection and secret redaction (issue #13).
   *
-  * AC1: three backend kinds selectable by setting.
-  * AC2: no secret in repo, journal, or logs.
-  * AC3: fakes cover all three kinds in CI.
+  * AC1: three backend kinds selectable by setting. AC2: no secret in repo, journal, or logs. AC3:
+  * fakes cover all three kinds in CI.
   */
 class BackendSuite extends munit.FunSuite:
 

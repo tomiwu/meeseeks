@@ -4,8 +4,8 @@ import meeseeks.sandbox.Credential
 
 /** Configuration for a brain backend.
   *
-  * The credential field uses Credential whose toString masks the secret value.
-  * The case class auto-generated toString is therefore safe to log.
+  * The credential field uses Credential whose toString masks the secret value. The case class
+  * auto-generated toString is therefore safe to log.
   *
   * @param kind
   *   which backend kind to use
