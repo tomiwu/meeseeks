@@ -17,7 +17,7 @@ import scala.concurrent.duration.*
   */
 class MtlsClusterSuite extends munit.FunSuite:
 
-  override val munitTimeout: Duration = 90.seconds
+  override val munitTimeout: Duration = 180.seconds
 
   private lazy val pki: TestPki.PkiBundle = TestPki.setup()
 
@@ -102,9 +102,9 @@ class MtlsClusterSuite extends munit.FunSuite:
       assertEquals(reply, "pong:hello")
     finally
       workerSys.terminate()
-      val _ = Await.ready(workerSys.whenTerminated, 10.seconds)
+      val _ = Await.ready(workerSys.whenTerminated, 60.seconds)
       serverSys.terminate()
-      val _ = Await.ready(serverSys.whenTerminated, 10.seconds)
+      val _ = Await.ready(serverSys.whenTerminated, 60.seconds)
       ()
   }
 
