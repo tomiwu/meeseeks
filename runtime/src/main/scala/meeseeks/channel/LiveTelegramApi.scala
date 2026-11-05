@@ -46,12 +46,14 @@ final class LiveTelegramApi(credential: Credential) extends TelegramApi:
               val text = msg.path("text").asText("")
               if text.isEmpty then None
               else
-                Some(TelegramUpdate(
-                  updateId = upd.path("update_id").asLong(),
-                  fromId = msg.path("from").path("id").asLong().toString,
-                  chatId = msg.path("chat").path("id").asLong(),
-                  text = text
-                ))
+                Some(
+                  TelegramUpdate(
+                    updateId = upd.path("update_id").asLong(),
+                    fromId = msg.path("from").path("id").asLong().toString,
+                    chatId = msg.path("chat").path("id").asLong(),
+                    text = text
+                  )
+                )
           }
     }
 
