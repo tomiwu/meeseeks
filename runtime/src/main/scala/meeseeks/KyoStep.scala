@@ -12,10 +12,11 @@ import scala.concurrent.Future
 import scala.concurrent.Promise
 import scala.concurrent.duration.*
 
-/** Result of one step: passed with output, or failed with reason. */
+/** Result of one step: passed with output, failed with reason, or stopped by a usage limit. */
 enum StepResult:
   case Passed(output: String)
   case Failed(reason: String)
+  case UsageLimitError(reason: String)
 
 /** Step configuration: timeout applied to the whole step, and maximum retry count. */
 final case class StepConfig(
@@ -77,7 +78,10 @@ object KyoStep:
             _ => None,
             _ => Some(StepResult.Failed("oracle panic"))
           ),
-        _ => None,
+        {
+          case BrainError.UsageLimit(msg) => Some(StepResult.UsageLimitError(msg))
+          case _                          => None
+        },
         _ => Some(StepResult.Failed("brain panic"))
       )
       val r: StepResult < Sync = resultOpt match
