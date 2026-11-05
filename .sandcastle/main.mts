@@ -11,7 +11,8 @@ const MAX_FIX_TRIES = 3;
 const MAX_ISSUES = Number(process.env.SANDCASTLE_MAX_ISSUES ?? "25");
 const PRIO: Record<string, number> = { "priority: critical": 0, "priority: high": 1, "priority: medium": 2, "priority: low": 3 };
 
-const gh = (...a: string[]) => execFileSync("gh", a, { encoding: "utf8" }).trim();
+// 60 s timeout, so a network stall cannot hang the loop.
+const gh = (...a: string[]) => execFileSync("gh", a, { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" }).trim();
 const git = (...a: string[]) => execFileSync("git", a, { encoding: "utf8" }).trim();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const REQUIRED = ["format", "lint", "test (3.10.0)", "test (3.9.0)", "crap", "import-check"];
@@ -41,7 +42,7 @@ async function waitChecks(pr: number, branch: string, issue: number): Promise<"p
     const checks: { bucket: string }[] = JSON.parse(execFileSync("gh", ["pr", "checks", String(pr), "-R", REPO, "--json", "bucket"], { encoding: "utf8" }) || "[]");
     if (checks.length && checks.every((c) => c.bucket === "pass" || c.bucket === "skipping")) return "pass";
     const failed = checks.some((c) => c.bucket === "fail" || c.bucket === "cancel");
-    git("fetch", "--quiet", "origin");
+    netGit(`[issue-${issue}] CI wait:`, "fetch", "--quiet", "origin");
     const mainMoved = Number(git("rev-list", "--count", `origin/${branch}..origin/main`)) > 0;
     if (mainMoved && rebaseOnMain(branch, issue, "remote", failed ? "CI failed and main moved" : "CI pending and main moved")) {
       await sleep(20_000);
@@ -89,6 +90,19 @@ function worktreeOf(branch: string): string | undefined {
   }
   return undefined;
 }
+// Network git call with a 60 s timeout. On timeout or error, retry once, then BLOCKER (no hang).
+function netGit(tag: string, ...a: string[]): string {
+  for (let i = 1; ; i++) {
+    try { return execFileSync("git", a, { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" }).trim(); }
+    catch (e) {
+      if (i >= 2) {
+        console.error(`BLOCKER: ${tag} git ${a[0]} failed or timed out 2 times. Loop stops.`);
+        process.exit(2);
+      }
+      console.log(`${tag} git ${a[0]} failed or timed out, retry once`);
+    }
+  }
+}
 function sha(ref: string): string | undefined {
   try { return execFileSync("git", ["rev-parse", "--verify", "--quiet", ref], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined; }
   catch { return undefined; }
@@ -99,14 +113,17 @@ function sha(ref: string): string | undefined {
 // Returns true if the branch moved.
 function rebaseOnMain(branch: string, issue: number, from: "local" | "remote", why: string): boolean {
   const tag = `[issue-${issue}] ${why}:`;
-  git("fetch", "origin");
+  netGit(tag, "fetch", "--quiet", "origin");
   const remoteSha = sha(`origin/${branch}`);
   const start = from === "remote" ? `origin/${branch}` : branch;
   const old = sha(start);
   if (!old) { console.log(`${tag} rebase skipped, ${start} does not exist yet`); return false; }
-  const push = (to: string) => remoteSha
-    ? git("push", `--force-with-lease=${branch}:${remoteSha}`, "origin", `${to}:refs/heads/${branch}`)
-    : git("push", "origin", `${to}:refs/heads/${branch}`);
+  const push = (to: string) => {
+    const now = netGit(tag, "ls-remote", "origin", `refs/heads/${branch}`).split(/\s/)[0] || undefined;
+    if (now === to) { console.log(`${tag} push skipped, remote already has ${to.slice(0, 7)}`); return; }
+    if (now) netGit(tag, "push", "--quiet", `--force-with-lease=${branch}:${remoteSha ?? now}`, "origin", `${to}:refs/heads/${branch}`);
+    else netGit(tag, "push", "--quiet", "origin", `${to}:refs/heads/${branch}`);
+  };
   const behind = Number(git("rev-list", "--count", `${old}..origin/main`));
   if (behind === 0) {
     console.log(`${tag} ${branch} already up to date with origin/main`);
@@ -140,7 +157,7 @@ function rebaseOnMain(branch: string, issue: number, from: "local" | "remote", w
     git("update-ref", `refs/heads/${branch}`, head);
   }
   quietGit("branch", "--set-upstream-to", `origin/${branch}`, branch);
-  git("fetch", "origin");
+  netGit(tag, "fetch", "--quiet", "origin");
   console.log(`${tag} rebased ${branch} on origin/main (was ${behind} commits behind), now ${head.slice(0, 7)}`);
   return true;
 }
@@ -162,7 +179,8 @@ async function mergeWhenCurrent(pr: number): Promise<"merged" | "fail"> {
   for (let i = 0; i < 5; i++) {
     const state = gh("pr", "view", String(pr), "-R", REPO, "--json", "mergeStateStatus", "--jq", ".mergeStateStatus");
     if (state === "BEHIND") {
-      gh("pr", "update-branch", String(pr), "-R", REPO);
+      try { gh("pr", "update-branch", String(pr), "-R", REPO); }
+      catch { console.log(`PR #${pr}: update-branch failed or timed out, retry once`); gh("pr", "update-branch", String(pr), "-R", REPO); }
       if ((await waitRequired(pr)) !== "pass") return "fail";
       continue;
     }
