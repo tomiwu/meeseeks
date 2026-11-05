@@ -7,8 +7,12 @@ import scala.collection.mutable
 
 /** In-memory Brain fake that returns scripted responses. Dequeues one step per call. */
 final class FakeBrain(queue: mutable.Queue[Script[BrainError, String]]) extends Brain:
+
+  val receivedPrompts: mutable.ListBuffer[String] = mutable.ListBuffer.empty
+
   override def ask(prompt: String): String < (Sync & Abort[BrainError]) =
     Sync.defer:
+      val _ = receivedPrompts += prompt
       if queue.isEmpty then Abort.fail(BrainError.Unavailable("no scripted responses remain"))
       else
         val step = queue.dequeue()
