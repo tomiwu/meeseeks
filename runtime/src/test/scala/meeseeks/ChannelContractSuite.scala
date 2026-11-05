@@ -12,9 +12,9 @@ import meeseeks.port.ChatMessage
 
 /** Contract tests for chat channel adapters (issue #17).
   *
-  * AC1: TelegramChat passes the Chat contract against FakeTelegramApi (no real network).
-  * AC2: FallbackChat switches to secondary on primary Disconnected.
-  * AC3: tokens come only from masked Credential fields (see ChatConfigSuite).
+  * AC1: TelegramChat passes the Chat contract against FakeTelegramApi (no real network). AC2:
+  * FallbackChat switches to secondary on primary Disconnected. AC3: tokens come only from masked
+  * Credential fields (see ChatConfigSuite).
   */
 class ChannelContractSuite extends munit.FunSuite:
 

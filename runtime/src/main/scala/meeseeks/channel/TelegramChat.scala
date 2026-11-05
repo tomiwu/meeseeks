@@ -7,8 +7,8 @@ import meeseeks.port.ChatMessage
 
 /** Chat adapter backed by the Telegram Bot API.
   *
-  * receive() polls for the next update and returns it as a ChatMessage. If no updates are ready,
-  * it retries. Kyo's Sync effect is trampolined so the recursion is stack-safe.
+  * receive() polls for the next update and returns it as a ChatMessage. If no updates are ready, it
+  * retries. Kyo's Sync effect is trampolined so the recursion is stack-safe.
   *
   * send() delivers text to tomaszChatId. Only Tomasz sends tasks (FR1); the Gateway enforces the
   * owner check on the sender field of received messages.

@@ -7,8 +7,8 @@ import meeseeks.port.ChatMessage
 
 /** Chat adapter that tries primary first and falls back to secondary on Disconnected.
   *
-  * Unauthorized errors propagate without fallback. Each call retries the primary first; there is
-  * no permanent switch to secondary.
+  * Unauthorized errors propagate without fallback. Each call retries the primary first; there is no
+  * permanent switch to secondary.
   */
 final class FallbackChat(primary: Chat, secondary: Chat) extends Chat:
 
