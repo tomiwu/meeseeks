@@ -1,6 +1,7 @@
 package meeseeks
 
 import java.time.Instant
+import meeseeks.port.DiskMonitor
 import org.apache.pekko.actor.typed.ActorRef
 import org.apache.pekko.actor.typed.Behavior
 import org.apache.pekko.actor.typed.scaladsl.Behaviors
@@ -43,6 +44,9 @@ object Overseer:
   /** Internal timer message: check for Meeseeks actors that have missed their heartbeat. */
   private case object CheckStalls extends Command
 
+  /** Internal timer message: check free disk space and open the breaker if below the threshold. */
+  private case object CheckDisk extends Command
+
   // ---- Permit result ----
 
   sealed trait PermitResult extends CborSerializable
@@ -83,13 +87,19 @@ object Overseer:
   /** Called when the overseer must restart a stalled Meeseeks. */
   type MeeseeksFactory = String => Unit
 
+  /** Free-disk threshold: open the breaker when usable bytes fall below this value. */
+  val DiskThresholdBytes: Long = 10L * 1024L * 1024L * 1024L
+
   // ---- Behavior ----
 
   def apply(
       id: String,
       factory: MeeseeksFactory = _ => (),
+      notify: String => Unit = _ => (),
+      diskMonitor: Option[DiskMonitor] = None,
       heartbeatTimeout: FiniteDuration = 30.seconds,
-      checkInterval: FiniteDuration = 5.seconds
+      checkInterval: FiniteDuration = 5.seconds,
+      diskCheckInterval: FiniteDuration = 30.seconds
   ): Behavior[Command] =
     Behaviors.withTimers { timers =>
       // Ephemeral in-memory state: not in the journal.
@@ -97,6 +107,9 @@ object Overseer:
       var heartbeats = Map.empty[String, Instant]
 
       timers.startTimerAtFixedRate(CheckStalls, checkInterval)
+      diskMonitor.foreach { _ =>
+        timers.startTimerAtFixedRate(CheckDisk, diskCheckInterval)
+      }
 
       EventSourcedBehavior[Command, Event, State](
         persistenceId = PersistenceId.ofUniqueId(id),
@@ -126,7 +139,12 @@ object Overseer:
 
             case OpenBreaker(reason) =>
               if state.breakerOpen then Effect.none
-              else Effect.persist(BreakerOpened(reason))
+              else
+                Effect
+                  .persist[Event, State](BreakerOpened(reason))
+                  .thenRun { _ =>
+                    notify(s"Circuit breaker opened: $reason. Send resume to restart.")
+                  }
 
             case ResumeBreaker =>
               if !state.breakerOpen then Effect.none
@@ -144,6 +162,18 @@ object Overseer:
                 factory(mid)
               }
               Effect.none
+
+            case CheckDisk =>
+              diskMonitor match
+                case Some(dm) if !state.breakerOpen && dm.freeBytes() < DiskThresholdBytes =>
+                  Effect
+                    .persist[Event, State](BreakerOpened("free disk below 10 GB"))
+                    .thenRun { _ =>
+                      notify(
+                        "Circuit breaker opened: free disk below 10 GB. Send resume to restart."
+                      )
+                    }
+                case _ => Effect.none
         },
         eventHandler = { (state, event) =>
           event match

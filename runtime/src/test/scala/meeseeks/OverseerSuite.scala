@@ -1,5 +1,6 @@
 package meeseeks
 
+import meeseeks.fake.FakeDiskMonitor
 import org.apache.pekko.actor.testkit.typed.scaladsl.ActorTestKit
 import scala.concurrent.duration.*
 
@@ -142,6 +143,34 @@ class OverseerSuite extends munit.FunSuite:
     overseer2 ! Overseer.AskPermit("m1", probe2.ref)
     assertEquals(probe2.receiveMessage(5.seconds), Overseer.Denied)
     kit2.shutdownTestKit()
+  }
+
+  // AT7: free disk below 10 GB opens the circuit breaker.
+  test("AT7: free disk below 10 GB opens the circuit breaker") {
+    val notified = new java.util.concurrent.CountDownLatch(1)
+    val disk = FakeDiskMonitor.gbFree(9L)
+
+    val kit = ActorTestKit()
+    val permitProbe = kit.createTestProbe[Overseer.PermitResult]()
+
+    val overseer = kit.spawn(
+      Overseer(
+        "at7-os-1",
+        notify = _ => notified.countDown(),
+        diskMonitor = Some(disk),
+        diskCheckInterval = 50.millis
+      ),
+      "at7-os-1"
+    )
+
+    // Wait for disk check to trigger the breaker.
+    assert(notified.await(5, java.util.concurrent.TimeUnit.SECONDS), "breaker did not open")
+
+    // Permit is denied while breaker is open.
+    overseer ! Overseer.AskPermit("test", permitProbe.ref)
+    assertEquals(permitProbe.receiveMessage(5.seconds), Overseer.Denied)
+
+    kit.shutdownTestKit()
   }
 
 end OverseerSuite

@@ -22,6 +22,7 @@ object Meeseeks:
   private final case class PermitReply(result: Overseer.PermitResult) extends Command
   private final case class StepPassed(output: String) extends Command
   private case object StepFailed extends Command
+  private final case class StepUsageLimit(reason: String) extends Command
   private case object HeartbeatTick extends Command
   private case object RetryPermit extends Command
 
@@ -52,9 +53,10 @@ object Meeseeks:
 
         def runStep(): Unit =
           context.pipeToSelf(KyoStep.runStep(brain, oracle, task, stepConfig)) {
-            case Success(StepResult.Passed(output)) => StepPassed(output)
-            case Success(StepResult.Failed(_))      => StepFailed
-            case Failure(_)                         => StepFailed
+            case Success(StepResult.Passed(output))       => StepPassed(output)
+            case Success(StepResult.Failed(_))            => StepFailed
+            case Success(StepResult.UsageLimitError(msg)) => StepUsageLimit(msg)
+            case Failure(_)                               => StepFailed
           }
 
         Behaviors.receiveMessage {
@@ -76,6 +78,11 @@ object Meeseeks:
 
           case StepFailed =>
             overseer ! Overseer.AskPermit(id, permitAdapter)
+            Behaviors.same
+
+          case StepUsageLimit(reason) =>
+            overseer ! Overseer.OpenBreaker(s"usage limit: $reason")
+            timers.startSingleTimer(RetryPermit, permitRetryDelay)
             Behaviors.same
 
           case HeartbeatTick =>

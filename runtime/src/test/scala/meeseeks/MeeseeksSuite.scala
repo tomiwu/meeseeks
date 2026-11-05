@@ -165,4 +165,49 @@ class MeeseeksSuite extends munit.FunSuite:
     kit.shutdownTestKit()
   }
 
+  // AT6: usage-limit brain error opens the circuit breaker; only resume closes it.
+  test("AT6: usage-limit error from brain opens the circuit breaker") {
+    val notified = new java.util.concurrent.LinkedBlockingQueue[String]()
+
+    val kit = ActorTestKit()
+    val brain = FakeBrain.withError(BrainError.UsageLimit("monthly quota exceeded"))
+    val oracle = FakeOracle.withVerdicts()
+    val resultProbe = kit.createTestProbe[String]()
+    val permitProbe = kit.createTestProbe[Overseer.PermitResult]()
+    val task = Task("goal", TaskType.Build, "check")
+
+    val overseer = kit.spawn(
+      Overseer("at6-os-1", notify = notified.put),
+      "at6-os-1"
+    )
+
+    val _ = kit.spawn(
+      Meeseeks(
+        "at6-m-1",
+        task,
+        overseer,
+        brain,
+        oracle,
+        resultProbe.ref,
+        permitRetryDelay = 50.millis
+      ),
+      "at6-m-1"
+    )
+
+    // Wait for the notify callback: breaker is now open.
+    val msg = notified.poll(5, java.util.concurrent.TimeUnit.SECONDS)
+    assertNotEquals(msg, null)
+
+    // Permit is denied while breaker is open.
+    overseer ! Overseer.AskPermit("test", permitProbe.ref)
+    assertEquals(permitProbe.receiveMessage(5.seconds), Overseer.Denied)
+
+    // Only the resume command closes the breaker.
+    overseer ! Overseer.ResumeBreaker
+    overseer ! Overseer.AskPermit("test", permitProbe.ref)
+    assertEquals(permitProbe.receiveMessage(5.seconds), Overseer.Granted)
+
+    kit.shutdownTestKit()
+  }
+
 end MeeseeksSuite
