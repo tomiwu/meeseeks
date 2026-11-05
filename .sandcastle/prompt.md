@@ -16,6 +16,7 @@ Work ONLY on issue #{{ISSUE_NUMBER}}: {{ISSUE_TITLE}}. You are on branch `{{BRAN
 - Never put secrets or knowledge data in the repo. The `runtime` module never imports `dev`.
 - Do not change `.github/` protection settings. Do not merge, close issues, or push; the host does that.
 - Make one or more commits with the prefix `#{{ISSUE_NUMBER}}:`.
+- The sandbox has Temurin JDK 25 and sbt 2.0.12 on PATH. Format with `sbt scalafmtAll`. CI checks with `sbt scalafmtCheckAll`. Run that check before you commit. Do not search the disk for Java, sbt or scalafmt, and do not format by hand.
 - If you are blocked, write the reason in a file `BLOCKED.md`, commit it, and stop.
 
 When you are done, output: <promise>COMPLETE</promise>
