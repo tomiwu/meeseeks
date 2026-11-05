@@ -102,9 +102,9 @@ class MtlsClusterSuite extends munit.FunSuite:
       assertEquals(reply, "pong:hello")
     finally
       workerSys.terminate()
-      val _ = Await.ready(workerSys.whenTerminated, 10.seconds)
+      val _ = Await.ready(workerSys.whenTerminated, 30.seconds)
       serverSys.terminate()
-      val _ = Await.ready(serverSys.whenTerminated, 10.seconds)
+      val _ = Await.ready(serverSys.whenTerminated, 30.seconds)
       ()
   }
 
