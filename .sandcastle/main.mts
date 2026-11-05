@@ -3,6 +3,7 @@
 import { run, claudeCode } from "@ai-hero/sandcastle";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 import { execFileSync } from "node:child_process";
+import { rmSync } from "node:fs";
 
 const REPO = "tomiwu/meeseeks";
 const MODEL = "claude-sonnet-4-6"; // latest Sonnet known to Sandcastle 0.12.0
@@ -33,12 +34,20 @@ function openPr(branch: string): number | undefined {
   return prs[0]?.number;
 }
 
-async function waitChecks(pr: number): Promise<"pass" | "fail"> {
+// Wait for CI. If CI is pending or failed and main moved, rebase on main and wait for the new run.
+async function waitChecks(pr: number, branch: string, issue: number): Promise<"pass" | "fail"> {
   await sleep(20_000);
   for (;;) {
     const checks: { bucket: string }[] = JSON.parse(execFileSync("gh", ["pr", "checks", String(pr), "-R", REPO, "--json", "bucket"], { encoding: "utf8" }) || "[]");
     if (checks.length && checks.every((c) => c.bucket === "pass" || c.bucket === "skipping")) return "pass";
-    if (checks.some((c) => c.bucket === "fail" || c.bucket === "cancel")) return "fail";
+    const failed = checks.some((c) => c.bucket === "fail" || c.bucket === "cancel");
+    git("fetch", "--quiet", "origin");
+    const mainMoved = Number(git("rev-list", "--count", `origin/${branch}..origin/main`)) > 0;
+    if (mainMoved && rebaseOnMain(branch, issue, "remote", failed ? "CI failed and main moved" : "CI pending and main moved")) {
+      await sleep(20_000);
+      continue;
+    }
+    if (failed) return "fail";
     await sleep(30_000);
   }
 }
@@ -61,30 +70,79 @@ async function closeIssue(n: number) {
 }
 
 // Rebase the branch on origin/main before we create or resume its PR.
+// The rebase runs in a temp worktree. Then the result goes to the remote branch, the local
+// branch ref, and any Sandcastle worktree that has the branch checked out, so the agent starts from it.
 // On a conflict, abort the rebase and stop the loop with BLOCKER.
-function rebaseOnMain(branch: string, issue: number, remote: boolean) {
+function quietGit(...a: string[]) {
+  try { execFileSync("git", a, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); } catch { /* cleanup only */ }
+}
+function dropTemp(dir: string) {
+  quietGit("worktree", "remove", "--force", dir);
+  rmSync(dir, { recursive: true, force: true });
+  quietGit("worktree", "prune");
+}
+function worktreeOf(branch: string): string | undefined {
+  let path: string | undefined;
+  for (const line of git("worktree", "list", "--porcelain").split("\n")) {
+    if (line.startsWith("worktree ")) path = line.slice(9);
+    else if (line === `branch refs/heads/${branch}`) return path;
+  }
+  return undefined;
+}
+function sha(ref: string): string | undefined {
+  try { return execFileSync("git", ["rev-parse", "--verify", "--quiet", ref], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined; }
+  catch { return undefined; }
+}
+// from = "local": start from the local branch (the agent just wrote to it).
+// from = "remote": start from origin/<branch> (resume, or CI wait).
+// Only call this between agent runs, never while the agent works in the checkout.
+// Returns true if the branch moved.
+function rebaseOnMain(branch: string, issue: number, from: "local" | "remote", why: string): boolean {
+  const tag = `[issue-${issue}] ${why}:`;
   git("fetch", "origin");
-  const start = remote ? `origin/${branch}` : branch;
-  const old = git("rev-parse", start);
+  const remoteSha = sha(`origin/${branch}`);
+  const start = from === "remote" ? `origin/${branch}` : branch;
+  const old = sha(start);
+  if (!old) { console.log(`${tag} rebase skipped, ${start} does not exist yet`); return false; }
+  const push = (to: string) => remoteSha
+    ? git("push", `--force-with-lease=${branch}:${remoteSha}`, "origin", `${to}:refs/heads/${branch}`)
+    : git("push", "origin", `${to}:refs/heads/${branch}`);
+  const behind = Number(git("rev-list", "--count", `${old}..origin/main`));
+  if (behind === 0) {
+    console.log(`${tag} ${branch} already up to date with origin/main`);
+    if (old !== remoteSha) push(old);
+    return false;
+  }
+  const used = worktreeOf(branch);
+  if (used && execFileSync("git", ["-C", used, "status", "--porcelain"], { encoding: "utf8" }).trim()) {
+    console.log(`${tag} rebase skipped, ${used} has changes that are not committed`);
+    return false;
+  }
   const dir = `/tmp/sandcastle-rebase-${issue}`;
-  try { git("worktree", "remove", "--force", dir); } catch { /* no old worktree */ }
-  git("worktree", "add", "--detach", dir, start); // temp worktree, so the branch can stay checked out elsewhere
-  const wt = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8" }).trim();
+  dropTemp(dir);
+  execFileSync("git", ["worktree", "add", "--quiet", "--detach", dir, start], { stdio: ["ignore", "pipe", "pipe"] });
+  const wt = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   try {
     wt("rebase", "origin/main");
   } catch {
     try { wt("rebase", "--abort"); } catch { /* no rebase in progress */ }
-    git("worktree", "remove", "--force", dir);
-    console.error(`BLOCKER: issue #${issue}: rebase of ${branch} on origin/main has conflicts. Loop stops.`);
+    dropTemp(dir);
+    console.error(`BLOCKER: ${tag} rebase of ${branch} on origin/main has conflicts. Loop stops.`);
     process.exit(2);
   }
   const head = wt("rev-parse", "HEAD");
-  git("worktree", "remove", "--force", dir);
-  if (remote) git("push", `--force-with-lease=${branch}:${old}`, "origin", `${head}:refs/heads/${branch}`);
-  else git("push", "origin", `${head}:refs/heads/${branch}`);
-  git("update-ref", `refs/heads/${branch}`, head);
-  try { git("branch", "--set-upstream-to", `origin/${branch}`, branch); } catch { /* fetch sets it later */ }
+  dropTemp(dir);
+  push(head);
+  if (used) {
+    // The agent reuses this worktree. Move its files too, not only the ref.
+    execFileSync("git", ["-C", used, "reset", "--hard", "--quiet", head], { stdio: ["ignore", "pipe", "pipe"] });
+  } else {
+    git("update-ref", `refs/heads/${branch}`, head);
+  }
+  quietGit("branch", "--set-upstream-to", `origin/${branch}`, branch);
   git("fetch", "origin");
+  console.log(`${tag} rebased ${branch} on origin/main (was ${behind} commits behind), now ${head.slice(0, 7)}`);
+  return true;
 }
 
 // Wait until all required checks pass on the PR head. "fail" if one fails.
@@ -136,18 +194,19 @@ for (let n = 0; n < MAX_ISSUES; n++) {
   const args = { ISSUE_NUMBER: String(issue.number), ISSUE_TITLE: issue.title, BRANCH: branch };
   let pr = openPr(branch); // resume an open PR instead of a duplicate
   if (pr) {
-    rebaseOnMain(branch, issue.number, true);
+    rebaseOnMain(branch, issue.number, "remote", "resume open PR");
   } else {
+    rebaseOnMain(branch, issue.number, sha(branch) ? "local" : "remote", "before first agent run");
     await agent("./.sandcastle/prompt.md", branch, args);
-    rebaseOnMain(branch, issue.number, false);
+    rebaseOnMain(branch, issue.number, "local", "after agent run");
     gh("pr", "create", "-R", REPO, "--head", branch, "--base", "main", "--title", `${issue.title} (#${issue.number})`, "--body", `Closes #${issue.number}\n\nMade by the Sandcastle loop.`);
     pr = openPr(branch)!;
   }
-  let ok = (await waitChecks(pr)) === "pass";
+  let ok = (await waitChecks(pr, branch, issue.number)) === "pass";
   for (let t = 1; !ok && t <= MAX_FIX_TRIES; t++) {
     await agent("./.sandcastle/fix-prompt.md", branch, { ...args, TRY: String(t), CI_LOG: failedLog(branch) });
-    git("push", "origin", branch);
-    ok = (await waitChecks(pr)) === "pass";
+    rebaseOnMain(branch, issue.number, "local", `after fixer try ${t}`);
+    ok = (await waitChecks(pr, branch, issue.number)) === "pass";
   }
   if (!ok) {
     gh("issue", "comment", String(issue.number), "-R", REPO, "--body", `Sandcastle: CI still fails after ${MAX_FIX_TRIES} fix tries on PR #${pr}. A person must look.`);
