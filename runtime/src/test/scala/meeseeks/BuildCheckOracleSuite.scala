@@ -58,14 +58,14 @@ class BuildCheckOracleSuite extends munit.FunSuite:
   test("AT5: code writer changes test file, oracle returns Fail") {
     val dir = Files.createTempDirectory("at5-test-")
     val testFile = dir.resolve("ExampleTest.scala")
-    Files.writeString(testFile, "// original test content")
+    val _ = Files.writeString(testFile, "// original test content")
 
     val guard = new TestFileGuard(Set(testFile))
     val checkRunner = FakeCheckRunner.withResults(CheckResult.Pass) // must not be called
     val oracle = new BuildCheckOracle(guard, checkRunner, "sbt test")
 
     // Simulate code writer modifying the test file.
-    Files.writeString(testFile, "// modified by code writer")
+    val _ = Files.writeString(testFile, "// modified by code writer")
 
     val result = runOracle(oracle.judge(OracleInput("add feature X", "brain output")))
 
@@ -80,38 +80,38 @@ class BuildCheckOracleSuite extends munit.FunSuite:
       t => fail(s"unexpected panic: $t")
     )
 
-    Files.deleteIfExists(testFile)
-    Files.deleteIfExists(dir)
+    val _ = Files.deleteIfExists(testFile)
+    val _ = Files.deleteIfExists(dir)
   }
 
   // TestFileGuard: unchanged file returns None.
   test("TestFileGuard: unchanged file returns None") {
     val dir = Files.createTempDirectory("guard-no-change-")
     val testFile = dir.resolve("TestA.scala")
-    Files.writeString(testFile, "content")
+    val _ = Files.writeString(testFile, "content")
 
     val guard = new TestFileGuard(Set(testFile))
     assertEquals(guard.detectChange(), None)
 
-    Files.deleteIfExists(testFile)
-    Files.deleteIfExists(dir)
+    val _ = Files.deleteIfExists(testFile)
+    val _ = Files.deleteIfExists(dir)
   }
 
   // TestFileGuard: modified file returns Some.
   test("TestFileGuard: modified file is detected") {
     val dir = Files.createTempDirectory("guard-modified-")
     val testFile = dir.resolve("TestB.scala")
-    Files.writeString(testFile, "original")
+    val _ = Files.writeString(testFile, "original")
 
     val guard = new TestFileGuard(Set(testFile))
-    Files.writeString(testFile, "modified")
+    val _ = Files.writeString(testFile, "modified")
 
     val result = guard.detectChange()
     assert(result.isDefined, "expected Some when file is modified")
     assert(result.get.contains("modified"), s"expected 'modified' in reason: ${result.get}")
 
-    Files.deleteIfExists(testFile)
-    Files.deleteIfExists(dir)
+    val _ = Files.deleteIfExists(testFile)
+    val _ = Files.deleteIfExists(dir)
   }
 
   // TestFileGuard: absent file added returns Some.
@@ -121,28 +121,28 @@ class BuildCheckOracleSuite extends munit.FunSuite:
     // File does not exist at construction time.
 
     val guard = new TestFileGuard(Set(testFile))
-    Files.writeString(testFile, "new content")
+    val _ = Files.writeString(testFile, "new content")
 
     val result = guard.detectChange()
     assert(result.isDefined, "expected Some when file is added")
 
-    Files.deleteIfExists(testFile)
-    Files.deleteIfExists(dir)
+    val _ = Files.deleteIfExists(testFile)
+    val _ = Files.deleteIfExists(dir)
   }
 
   // TestFileGuard: existing file removed returns Some.
   test("TestFileGuard: removed file is detected") {
     val dir = Files.createTempDirectory("guard-removed-")
     val testFile = dir.resolve("TestD.scala")
-    Files.writeString(testFile, "content to remove")
+    val _ = Files.writeString(testFile, "content to remove")
 
     val guard = new TestFileGuard(Set(testFile))
-    Files.deleteIfExists(testFile)
+    val _ = Files.deleteIfExists(testFile)
 
     val result = guard.detectChange()
     assert(result.isDefined, "expected Some when file is removed")
 
-    Files.deleteIfExists(dir)
+    val _ = Files.deleteIfExists(dir)
   }
 
   // BuildCheckOracle: no test changes, check passes, oracle returns Pass.
