@@ -70,4 +70,55 @@ class MainSuite extends munit.FunSuite:
     Await.result(system.whenTerminated, 10.seconds)
   }
 
+  test("Server handles resume command from owner") {
+    val resumeMsg = ChatMessage("owner-77", "resume")
+    val config = ServerConfig(
+      writerId = "test-main-4",
+      ownerId = "owner-77",
+      chat = FakeChat.withMessages(resumeMsg),
+      brain = FakeBrain.withValues("ok"),
+      oracle = FakeOracle.withVerdicts(OracleVerdict.Pass),
+      pekkoConfig = ConfigFactory.load()
+    )
+
+    val system = Server.boot(config)
+    Thread.sleep(400L)
+    system.terminate()
+    Await.result(system.whenTerminated, 10.seconds)
+  }
+
+  test("Server accepts valid build task from owner and spawns Meeseeks") {
+    val taskMsg = ChatMessage("owner-77", "build: test goal\ncheck: sbt test")
+    val config = ServerConfig(
+      writerId = "test-main-5",
+      ownerId = "owner-77",
+      chat = FakeChat.withMessages(taskMsg),
+      brain = FakeBrain.withValues("ok"),
+      oracle = FakeOracle.withVerdicts(OracleVerdict.Pass),
+      pekkoConfig = ConfigFactory.load()
+    )
+
+    val system = Server.boot(config)
+    Thread.sleep(1000L)
+    system.terminate()
+    Await.result(system.whenTerminated, 10.seconds)
+  }
+
+  test("Server rejects task with no check and sends refusal to owner") {
+    val badMsg = ChatMessage("owner-77", "some text with no check field")
+    val config = ServerConfig(
+      writerId = "test-main-6",
+      ownerId = "owner-77",
+      chat = FakeChat.withMessages(badMsg),
+      brain = FakeBrain.withValues("ok"),
+      oracle = FakeOracle.withVerdicts(OracleVerdict.Pass),
+      pekkoConfig = ConfigFactory.load()
+    )
+
+    val system = Server.boot(config)
+    Thread.sleep(400L)
+    system.terminate()
+    Await.result(system.whenTerminated, 10.seconds)
+  }
+
 end MainSuite

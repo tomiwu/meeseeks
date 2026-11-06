@@ -88,6 +88,13 @@ jobs:
             ~/.cache/coursier
           key: ${{ runner.os }}-sbt-${{ hashFiles('**/build.sbt', '**/project/build.properties', '**/project/plugins.sbt') }}
       - run: sbt crap
+      - uses: tomiwu/crap4s@v0.2.1
+        with:
+          tasty: runtime/target/scala-3.10.0/classes dev/target/scala-3.10.0/classes
+          coverage: runtime/target/coverage dev/target/coverage
+          classpath-file: dev/target/classpath.txt
+          threshold: "6"
+          version: v0.2.1
 
   compose-check:
     runs-on: ubuntu-latest

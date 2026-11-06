@@ -16,6 +16,8 @@ ThisBuild / scalacOptions ++= Seq(
   "-Wvalue-discard",
 )
 
+lazy val dumpClasspath = taskKey[Unit]("Write Test/fullClasspath to target/classpath.txt.")
+
 lazy val root = project
   .in(file("."))
   .aggregate(runtime, dev)
@@ -49,6 +51,12 @@ lazy val runtime = project
       "org.apache.pekko" %% "pekko-persistence-testkit" % pekkoV % Test,
       "org.scalameta" %% "munit" % munitV % Test,
     ),
+    dumpClasspath := {
+      val cp = (Test / fullClasspath).value
+      val conv = fileConverter.value
+      val out = target.value / "classpath.txt"
+      IO.write(out, cp.map(a => conv.toPath(a.data).toAbsolutePath.toString).mkString(java.io.File.pathSeparator))
+    },
   )
 
 lazy val dev = project
@@ -59,7 +67,17 @@ lazy val dev = project
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitV % Test,
     ),
+    dumpClasspath := {
+      val cp = (Test / fullClasspath).value
+      val conv = fileConverter.value
+      val out = target.value / "classpath.txt"
+      IO.write(out, cp.map(a => conv.toPath(a.data).toAbsolutePath.toString).mkString(java.io.File.pathSeparator))
+    },
   )
 
-// crap: cross-build test (proves both Scala versions pass).
-addCommandAlias("crap", "+test")
+// crap: compile with coverage, run tests, dump classpath for crap4s.
+// -coverage-out is scoped to this alias only and is not in the normal test job.
+addCommandAlias(
+  "crap",
+  "; set ThisBuild / Compile / scalacOptions += \"-coverage-out:target/coverage\"; clean; test; runtime/dumpClasspath; dev/dumpClasspath"
+)

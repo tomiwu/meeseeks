@@ -219,14 +219,10 @@ def startFromEnv(env: Map[String, String]): Unit =
     sys.exit(1)
   }
 
-  val journalDir = new File(rawPath)
-  val journalPath = journalDir.getAbsolutePath
-  if !journalDir.exists() then
-    val _ = journalDir.mkdirs()
-
+  val journalDir = ensureJournalDir(rawPath)
   val overrides = ConfigFactory.parseString(
     s"""meeseeks.writer-id = "$writerId"
-       |meeseeks.journal.path = "$journalPath"
+       |meeseeks.journal.path = "${journalDir.getAbsolutePath}"
        |""".stripMargin
   )
   val pekkoConfig = overrides.withFallback(ConfigFactory.load())
@@ -235,35 +231,15 @@ def startFromEnv(env: Map[String, String]): Unit =
   val api = new LiveTelegramApi(telegramCred)
   val chat = new TelegramChat(api, ownerIdLong)
 
-  val brain: Brain = brainMode match
-    case "fake" =>
-      SmokeOnlyBrain
-    case "subscription" | "" =>
-      buildSubscriptionBrain(env)
-    case "apikey" =>
-      buildApiKeyBrain(env)
-    case "local" =>
-      buildLocalModelBrain(env)
-    case other =>
-      System.err.println(
-        s"[meeseeks] unknown MEESEEKS_BRAIN value: $other; use fake/subscription/apikey/local"
-      )
-      sys.exit(1)
+  val brain: Brain = selectBrain(env, brainMode)
 
-  // Live DiskMonitor: check usable bytes on the data volume.
   val diskMonitor = new LiveDiskMonitor(journalDir.toPath)
-
-  // Live CheckRunner: run checks inside a fresh read-only Podman container.
   val checkImage = env.getOrElse("MEESEEKS_SANDBOX_IMAGE", "meeseeks/brain:latest")
   val rawTaskDir = env.getOrElse("MEESEEKS_TASK_DIR", "./task")
   val taskDir = Paths.get(rawTaskDir).toAbsolutePath
   val sandboxConfig = SandboxConfig(image = checkImage, taskDir = taskDir)
   val checkRunner = new PodmanCheckRunner(new PodmanSandbox(sandboxConfig))
-
-  // Live UrlVerifier: HEAD requests with a 10 s timeout.
   val urlVerifier = LiveUrlVerifier()
-
-  // Live ResearchJudge: calls the configured brain with a blind prompt.
   val researchJudge = new LiveResearchJudge(brain)
 
   Server.start(
@@ -280,6 +256,29 @@ def startFromEnv(env: Map[String, String]): Unit =
       researchJudge = Some(researchJudge)
     )
   )
+
+private def ensureJournalDir(rawPath: String): File =
+  val dir = new File(rawPath)
+  if !dir.exists() then
+    val _ = dir.mkdirs()
+  dir
+
+private val brainBuilders: Map[String, Map[String, String] => Brain] = Map(
+  "fake" -> (_ => SmokeOnlyBrain),
+  "subscription" -> buildSubscriptionBrain,
+  "" -> buildSubscriptionBrain,
+  "apikey" -> buildApiKeyBrain,
+  "local" -> buildLocalModelBrain
+)
+
+private def selectBrain(env: Map[String, String], brainMode: String): Brain =
+  brainBuilders.get(brainMode) match
+    case Some(builder) => builder(env)
+    case None =>
+      System.err.println(
+        s"[meeseeks] unknown MEESEEKS_BRAIN value: $brainMode; use fake/subscription/apikey/local"
+      )
+      sys.exit(1)
 
 private def buildSubscriptionBrain(env: Map[String, String]): Brain =
   val image = env.getOrElse("MEESEEKS_SANDBOX_IMAGE", "meeseeks/brain:latest")

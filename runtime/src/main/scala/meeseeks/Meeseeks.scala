@@ -22,15 +22,17 @@ object Meeseeks:
   type ChildFactory = (String, Task, String) => Unit
 
   sealed trait Command
+  private sealed trait PermitMsg extends Command
+  private sealed trait StepMsg extends Command
 
-  private final case class PermitReply(result: Overseer.PermitResult) extends Command
-  private final case class StepPassed(output: String) extends Command
-  private case object StepFailed extends Command
-  private final case class StepUsageLimit(reason: String) extends Command
-  private final case class StepStopped(reason: String, highConfidence: Boolean) extends Command
-  private case object HeartbeatTick extends Command
-  private case object RetryPermit extends Command
   private final case class SolvedWorkReply(result: Overseer.SolvedWorkResult) extends Command
+  private final case class PermitReply(result: Overseer.PermitResult) extends PermitMsg
+  private case object RetryPermit extends PermitMsg
+  private final case class StepPassed(output: String) extends StepMsg
+  private case object StepFailed extends StepMsg
+  private final case class StepStopped(reason: String, highConfidence: Boolean) extends StepMsg
+  private final case class StepUsageLimit(reason: String) extends StepMsg
+  private case object HeartbeatTick extends Command
 
   /** Overseer control messages routed through a message adapter. */
   final case class WrappedControl(msg: Overseer.MeeseeksControl) extends Command
@@ -64,12 +66,10 @@ object Meeseeks:
         val frustration = FrustrationTracker(frustrationConfig, clock)
         var stuckReportSent = false
 
-        // Child tracking for split mode.
         var pendingChildren: Set[String] = Set.empty
         var childResults: List[String] = List.empty
         var awaitingChildren: Boolean = false
 
-        // Register with overseer.
         parentId match
           case Some(pid) => overseer ! Overseer.RegisterChild(id, pid, controlAdapter)
           case None      => overseer ! Overseer.RegisterMeeseeks(id, controlAdapter)
@@ -114,94 +114,99 @@ object Meeseeks:
         def reportSuccess(output: String): Behavior[Command] =
           parentId match
             case Some(pid) =>
-              // Children report to their parent; the parent decides when the goal is solved.
               overseer ! Overseer.ChildDone(id, pid, output)
             case None =>
               resultSink ! s"Task complete: $output"
               overseer ! Overseer.RecordSolvedWork(task.goal, output)
           Behaviors.stopped
 
-        Behaviors.receiveMessage {
-          case SolvedWorkReply(Overseer.SolvedWork(result)) =>
-            // Reuse previously solved work; skip running any steps.
-            resultSink ! s"Task complete (reused): $result"
-            Behaviors.stopped
-
-          case SolvedWorkReply(Overseer.NoSolvedWork) =>
-            // No prior result; begin the permit loop.
-            overseer ! Overseer.AskPermit(id, permitAdapter)
-            Behaviors.same
-
-          case PermitReply(Overseer.Granted) =>
-            runStep()
-            Behaviors.same
-
-          case PermitReply(Overseer.Denied) =>
-            timers.startSingleTimer(RetryPermit, permitRetryDelay)
-            Behaviors.same
-
-          case RetryPermit =>
-            overseer ! Overseer.AskPermit(id, permitAdapter)
-            Behaviors.same
-
-          case StepPassed(output) =>
-            reportSuccess(output)
-
-          case StepFailed =>
-            frustration.recordFailure()
-            reportStuckIfNeeded()
-            // Notify parent if this is a child.
-            parentId.foreach { pid => overseer ! Overseer.ChildFail(id, pid) }
-            if shouldSplit() then spawnChildren()
-            else if !awaitingChildren then overseer ! Overseer.AskPermit(id, permitAdapter)
-            Behaviors.same
-
-          case StepStopped(reason, highConfidence) =>
-            val atLevelFive = frustration.level == FrustrationLevel.Stuck
-            if atLevelFive && !highConfidence then
-              // Level 5: ignore low-confidence oracle stop, keep working.
+        def handleSolvedWork(msg: SolvedWorkReply): Behavior[Command] =
+          msg match
+            case SolvedWorkReply(Overseer.SolvedWork(result)) =>
+              resultSink ! s"Task complete (reused): $result"
+              Behaviors.stopped
+            case SolvedWorkReply(Overseer.NoSolvedWork) =>
               overseer ! Overseer.AskPermit(id, permitAdapter)
               Behaviors.same
-            else
-              parentId match
-                case Some(pid) =>
-                  overseer ! Overseer.ChildFail(id, pid)
-                case None =>
-                  resultSink ! s"Task stopped: $reason"
-              Behaviors.stopped
 
-          case StepUsageLimit(reason) =>
-            overseer ! Overseer.OpenBreaker(s"usage limit: $reason")
-            timers.startSingleTimer(RetryPermit, permitRetryDelay)
+        def handlePermit(msg: PermitMsg): Behavior[Command] =
+          msg match
+            case PermitReply(Overseer.Granted) =>
+              runStep()
+              Behaviors.same
+            case PermitReply(Overseer.Denied) =>
+              timers.startSingleTimer(RetryPermit, permitRetryDelay)
+              Behaviors.same
+            case RetryPermit =>
+              overseer ! Overseer.AskPermit(id, permitAdapter)
+              Behaviors.same
+
+        def onUsageLimit(reason: String): Behavior[Command] =
+          overseer ! Overseer.OpenBreaker(s"usage limit: $reason")
+          timers.startSingleTimer(RetryPermit, permitRetryDelay)
+          Behaviors.same
+
+        def onStepFailed(): Behavior[Command] =
+          frustration.recordFailure()
+          reportStuckIfNeeded()
+          parentId.foreach { pid => overseer ! Overseer.ChildFail(id, pid) }
+          if shouldSplit() then spawnChildren()
+          else if !awaitingChildren then overseer ! Overseer.AskPermit(id, permitAdapter)
+          Behaviors.same
+
+        def onStepStopped(reason: String, highConfidence: Boolean): Behavior[Command] =
+          val atLevelFive = frustration.level == FrustrationLevel.Stuck
+          if atLevelFive && !highConfidence then
+            overseer ! Overseer.AskPermit(id, permitAdapter)
             Behaviors.same
-
-          case HeartbeatTick =>
-            overseer ! Overseer.Heartbeat(id)
-            Behaviors.same
-
-          case WrappedControl(Overseer.StopMeeseeks) =>
+          else
+            parentId match
+              case Some(pid) =>
+                overseer ! Overseer.ChildFail(id, pid)
+              case None =>
+                resultSink ! s"Task stopped: $reason"
             Behaviors.stopped
 
-          case WrappedControl(Overseer.ChildSucceeded(cid, result)) =>
-            if pendingChildren.contains(cid) then
-              pendingChildren = pendingChildren - cid
-              childResults = result :: childResults
-              if pendingChildren.isEmpty then
-                val merged = childResults.reverse.mkString("\n")
-                reportSuccess(merged)
-              else Behaviors.same
-            else Behaviors.same
+        def handleStep(msg: StepMsg): Behavior[Command] =
+          msg match
+            case StepPassed(output)      => reportSuccess(output)
+            case StepFailed              => onStepFailed()
+            case StepStopped(reason, hc) => onStepStopped(reason, hc)
+            case StepUsageLimit(reason)  => onUsageLimit(reason)
 
-          case WrappedControl(Overseer.ChildFailed(cid)) =>
-            if pendingChildren.contains(cid) then
-              pendingChildren = pendingChildren - cid
-              frustration.recordFailure()
-              reportStuckIfNeeded()
-              if pendingChildren.isEmpty then
-                awaitingChildren = false
-                if shouldSplit() then spawnChildren()
-                else overseer ! Overseer.AskPermit(id, permitAdapter)
-            Behaviors.same
+        def onChildSucceeded(cid: String, result: String): Behavior[Command] =
+          if pendingChildren.contains(cid) then
+            pendingChildren = pendingChildren - cid
+            childResults = result :: childResults
+            if pendingChildren.isEmpty then
+              val merged = childResults.reverse.mkString("\n")
+              reportSuccess(merged)
+            else Behaviors.same
+          else Behaviors.same
+
+        def onChildFailed(cid: String): Behavior[Command] =
+          if pendingChildren.contains(cid) then
+            pendingChildren = pendingChildren - cid
+            frustration.recordFailure()
+            reportStuckIfNeeded()
+            if pendingChildren.isEmpty then
+              awaitingChildren = false
+              if shouldSplit() then spawnChildren()
+              else overseer ! Overseer.AskPermit(id, permitAdapter)
+          Behaviors.same
+
+        def handleControl(msg: Overseer.MeeseeksControl): Behavior[Command] =
+          msg match
+            case Overseer.StopMeeseeks           => Behaviors.stopped
+            case Overseer.ChildSucceeded(cid, r) => onChildSucceeded(cid, r)
+            case Overseer.ChildFailed(cid)       => onChildFailed(cid)
+
+        Behaviors.receiveMessage {
+          case msg: SolvedWorkReply => handleSolvedWork(msg)
+          case msg: PermitMsg       => handlePermit(msg)
+          case msg: StepMsg         => handleStep(msg)
+          case HeartbeatTick        => overseer ! Overseer.Heartbeat(id); Behaviors.same
+          case WrappedControl(msg)  => handleControl(msg)
         }
       }
     }

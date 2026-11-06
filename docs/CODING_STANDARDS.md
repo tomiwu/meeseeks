@@ -1,6 +1,6 @@
-# crap4s coding standards
+# Meeseeks coding standards
 
-Scope: all Scala code in this repository. Scala 3 only, Scala CLI build.
+Scope: all Scala code in this repository. Scala 3 only, sbt 2.0 build.
 Each rule has one reason. Source tags:
 - **[A8]**: from "Scala Architecture and Design Patterns - Part 8", Jonathan A., LinkedIn, 2026-10-17
   (https://www.linkedin.com/pulse/scala-architecture-design-patterns-part-8-jonathan-altamura-rxsxc/).
@@ -24,7 +24,7 @@ Each rule has one reason. Source tags:
 11. **Do not use `null`, `return`, `var` in core logic, or `asInstanceOf`.** If a Java API can return `null`, wrap it in `Option(...)` at once. [S3] Reason: these break the pure, type-safe core.
 12. **Report errors as values** (`Either[Error, A]` with an `enum Error`). No exception may escape (see rule 20). [S3] Reason: errors stay visible in types.
 13. **Use immutable collections and `Vector`/`List`.** [S3] Reason: no shared mutable state.
-14. **Keep the CRAP score of every unit below 4**: small methods, few branches, high coverage. [crap4s project rule] Reason: the tool must pass its own gate.
+14. **Keep the CRAP score of every unit below 6**: small methods, few branches, high coverage. [Meeseeks project rule] Reason: every unit must pass the crap4s gate with `--threshold 6`.
 15. **Write modules as capabilities (opaque function types) and use them with `?=>`.** Wire them only in `App.scala`. Put the flow only in `Pipeline.scala`. Only `Main` and the input adapters touch files or the console. [S3] Reason: the flow has no wiring and no side effects, so a test can give it fake modules.
 
     ```scala
@@ -141,26 +141,25 @@ docstrings.style = Asterisk
 fileOverride { "glob:**/*.sc" { runner.dialect = scala3 } }
 ```
 
-Check: `scala-cli fmt --check .` Fix: `scala-cli fmt .`
+Check: `sbt scalafmtCheckAll` Fix: `sbt scalafmtAll`
 
 ## 4. Static checks
 
 ### 4.1 Compiler options (Scala 3.10)
 
-Put these in `project.scala`:
+Put these in `build.sbt` under `ThisBuild / scalacOptions`:
 
 ```scala
-//> using options -deprecation -feature -unchecked -Werror
-//> using options -Wunused:all -Wvalue-discard -Wnonunit-statement -Wsafe-init
-//> using options -Wconf:any:verbose
+"-deprecation", "-feature", "-unchecked", "-Werror",
+"-Wunused:all", "-Wvalue-discard", "-Wnonunit-statement", "-Wsafe-init"
 ```
 
 Reasons: `-Werror` makes each warning a CI failure; `-Wunused:all` finds dead code and is necessary for the Scalafix `RemoveUnused` rule; `-Wvalue-discard` and `-Wnonunit-statement` find lost results; `-Wsafe-init` finds bad initialization order.
 Optional, later: `-Yexplicit-nulls` (strict, but tasty-query and Java APIs make it noisy).
 
-### 4.2 Scalafix (through Scala CLI)
+### 4.2 Scalafix (through sbt)
 
-`scala-cli --power fix --check .` runs Scalafix (default version 0.14.9 in Scala CLI 1.18.0) and fails when a rewrite is necessary. Proposed `.scalafix.conf`:
+`sbt scalafix --check` runs Scalafix and fails when a rewrite is necessary. Proposed `.scalafix.conf`:
 
 ```hocon
 rules = [
@@ -193,10 +192,7 @@ Three more local rules guard the capability style (`NoExtendsCapability`, `Capab
 
 Four more local rules guard errors and side effects: `NoThrow`, `NoUncheckedTry`, `NoUnsafeCall` and `SideEffectsAtEdge`. They check only files under `src/`. `NoThrow` flags `throw`. `NoUncheckedTry` flags `try` outside the files in `UncheckedTryFiles`, and flags a `catch` that does not return `Left(...)` outside the files in `UncheckedTryGuards`. `NoUnsafeCall` flags `.get` without arguments, `.head`, `.last`, `.tail`, `.reduce`, `.toInt`, `.toDouble`, `require`, `assert` and `???`. `SideEffectsAtEdge` flags exit, print, console, environment, `java.io`, `Files`, `FileSystems`, `var` and `scala.collection.mutable` outside the path parts in `SideEffectsAllow`. All lists are in `.scalafix.conf`.
 
-The allowed edge files in `.scalafix.conf` are:
-- `UncheckedTryFiles`: `crap4s/core/Eithers.scala`, `crap4s/Effects.scala`. These files may use `try`.
-- `UncheckedTryGuards`: `crap4s/Effects.scala`. A `catch` outside this file must return `Left(...)`.
-- `SideEffectsAllow`: `crap4s/edge/`, `crap4s/input/`, `crap4s/Main.scala`. Only these paths may do IO.
+The allowed edge files in `.scalafix.conf` must be updated for Meeseeks paths when these rules are configured. Use the `runtime/` and `dev/` module paths in place of any crap4s-specific paths.
 
 When you add a capability, add its name to `CapabilityStyle`.
 
@@ -213,4 +209,4 @@ Risk: the plugin version must match the exact Scala version, so each Scala updat
 
 ## 5. CI gate
 
-On each pull request, GitHub Actions runs: format check, compile with `-Werror`, Scalafix check, tests, and the crap4s self-check (CRAP < 4 for every unit). The Sandcastle loop merges a PR only when all checks pass.
+On each pull request, GitHub Actions runs: format check, compile with `-Werror`, Scalafix check, tests, and the crap4s check (CRAP score below 6 for every unit, using `--threshold 6`). The Sandcastle loop merges a PR only when all checks pass.
