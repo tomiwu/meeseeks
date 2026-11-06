@@ -3,6 +3,7 @@ package meeseeks
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
 import java.io.File
+import java.nio.file.Paths
 import java.util.concurrent.atomic.AtomicInteger
 import kyo.*
 import meeseeks.brain.ApiKeyBrain
@@ -12,10 +13,16 @@ import meeseeks.brain.LiveBrainRegistry
 import meeseeks.brain.LiveHttpSender
 import meeseeks.brain.LocalModelBrain
 import meeseeks.brain.SubscriptionBrain
+import meeseeks.build.BuildCheckOracle
+import meeseeks.build.CheckRunner
+import meeseeks.build.PodmanCheckRunner
+import meeseeks.build.TestFileGuard
 import meeseeks.channel.LiveTelegramApi
 import meeseeks.channel.TelegramChat
 import meeseeks.port.*
 import meeseeks.sandbox.Credential
+import meeseeks.sandbox.PodmanSandbox
+import meeseeks.sandbox.SandboxConfig
 import org.apache.pekko.actor.typed.ActorRef
 import org.apache.pekko.actor.typed.ActorSystem
 import org.apache.pekko.actor.typed.Behavior
@@ -33,7 +40,11 @@ final case class ServerConfig(
     chat: Chat,
     brain: Brain,
     oracle: Oracle,
-    pekkoConfig: Config
+    pekkoConfig: Config,
+    diskMonitor: Option[DiskMonitor] = None,
+    checkRunner: Option[CheckRunner] = None,
+    urlVerifier: Option[UrlVerifier] = None,
+    researchJudge: Option[ResearchJudge] = None
 )
 
 /** Minimal brain for MEESEEKS_BRAIN=fake smoke mode: returns a canned answer. */
@@ -59,12 +70,21 @@ object Server:
 
   private def guardian(config: ServerConfig): Behavior[ServerCmd] =
     Behaviors.setup { ctx =>
-      val overseer = ctx.spawn(Overseer(config.writerId), "overseer")
+      val overseer =
+        ctx.spawn(Overseer(config.writerId, diskMonitor = config.diskMonitor), "overseer")
       val resultSink = ctx.spawn(chatSink(config.chat), "result-sink")
 
       // Shared factory: children send SpawnMeeseeks back to the guardian.
       val spawnFactory: Meeseeks.ChildFactory =
         (cid, ctask, pid) => ctx.self ! SpawnMeeseeks(cid, ctask, Some(pid))
+
+      def oracleFor(task: Task): Oracle = task.taskType match
+        case TaskType.Build =>
+          config.checkRunner.fold(config.oracle)(runner =>
+            new BuildCheckOracle(new TestFileGuard(Set.empty), runner, task.check)
+          )
+        case TaskType.Research =>
+          config.oracle
 
       def spawnOne(id: String, task: Task, parentId: Option[String]): Unit =
         val _ = ctx.spawn(
@@ -73,7 +93,7 @@ object Server:
             task,
             overseer,
             config.brain,
-            config.oracle,
+            oracleFor(task),
             resultSink,
             parentId = parentId,
             childFactory = Some(spawnFactory)
@@ -230,7 +250,36 @@ def startFromEnv(env: Map[String, String]): Unit =
       )
       sys.exit(1)
 
-  Server.start(ServerConfig(writerId, ownerId, chat, brain, SmokeOnlyOracle, pekkoConfig))
+  // Live DiskMonitor: check usable bytes on the data volume.
+  val diskMonitor = new LiveDiskMonitor(journalDir.toPath)
+
+  // Live CheckRunner: run checks inside a fresh read-only Podman container.
+  val checkImage = env.getOrElse("MEESEEKS_SANDBOX_IMAGE", "meeseeks/brain:latest")
+  val rawTaskDir = env.getOrElse("MEESEEKS_TASK_DIR", "./task")
+  val taskDir = Paths.get(rawTaskDir).toAbsolutePath
+  val sandboxConfig = SandboxConfig(image = checkImage, taskDir = taskDir)
+  val checkRunner = new PodmanCheckRunner(new PodmanSandbox(sandboxConfig))
+
+  // Live UrlVerifier: HEAD requests with a 10 s timeout.
+  val urlVerifier = LiveUrlVerifier()
+
+  // Live ResearchJudge: calls the configured brain with a blind prompt.
+  val researchJudge = new LiveResearchJudge(brain)
+
+  Server.start(
+    ServerConfig(
+      writerId,
+      ownerId,
+      chat,
+      brain,
+      SmokeOnlyOracle,
+      pekkoConfig,
+      diskMonitor = Some(diskMonitor),
+      checkRunner = Some(checkRunner),
+      urlVerifier = Some(urlVerifier),
+      researchJudge = Some(researchJudge)
+    )
+  )
 
 private def buildSubscriptionBrain(env: Map[String, String]): Brain =
   val image = env.getOrElse("MEESEEKS_SANDBOX_IMAGE", "meeseeks/brain:latest")
