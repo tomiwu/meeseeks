@@ -32,6 +32,9 @@ lazy val runtime = project
   .in(file("runtime"))
   .settings(
     name := "meeseeks-runtime",
+    // Fork tests so each run gets an isolated JVM: prevents cluster ActorSystems
+    // in one test run from interfering with those in a parallel or repeated run.
+    Test / fork := true,
     libraryDependencies ++= Seq(
       "org.apache.pekko" %% "pekko-actor-typed" % pekkoV,
       "org.apache.pekko" %% "pekko-persistence-typed" % pekkoV,
