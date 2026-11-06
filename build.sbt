@@ -56,7 +56,8 @@ lazy val runtime = project
     dumpClasspath := {
       val cp = (Test / fullClasspath).value
       val conv = fileConverter.value
-      val out = target.value / "classpath.txt"
+      val out = baseDirectory.value / "target" / "classpath.txt"
+      IO.createDirectory(out.getParentFile)
       IO.write(out, cp.map(a => conv.toPath(a.data).toAbsolutePath.toString).mkString(java.io.File.pathSeparator))
     },
   )
@@ -73,7 +74,8 @@ lazy val dev = project
     dumpClasspath := {
       val cp = (Test / fullClasspath).value
       val conv = fileConverter.value
-      val out = target.value / "classpath.txt"
+      val out = baseDirectory.value / "target" / "classpath.txt"
+      IO.createDirectory(out.getParentFile)
       IO.write(out, cp.map(a => conv.toPath(a.data).toAbsolutePath.toString).mkString(java.io.File.pathSeparator))
     },
   )
