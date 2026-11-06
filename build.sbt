@@ -17,6 +17,7 @@ ThisBuild / scalacOptions ++= Seq(
 )
 
 lazy val dumpClasspath = taskKey[Unit]("Write Test/fullClasspath to target/classpath.txt.")
+lazy val makeCoverageDir = taskKey[Unit]("Create target/coverage so the forked JVM can write measurements.")
 
 lazy val root = project
   .in(file("."))
@@ -51,6 +52,7 @@ lazy val runtime = project
       "org.apache.pekko" %% "pekko-persistence-testkit" % pekkoV % Test,
       "org.scalameta" %% "munit" % munitV % Test,
     ),
+    makeCoverageDir := IO.createDirectory(baseDirectory.value / "target" / "coverage"),
     dumpClasspath := {
       val cp = (Test / fullClasspath).value
       val conv = fileConverter.value
@@ -67,6 +69,7 @@ lazy val dev = project
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitV % Test,
     ),
+    makeCoverageDir := IO.createDirectory(baseDirectory.value / "target" / "coverage"),
     dumpClasspath := {
       val cp = (Test / fullClasspath).value
       val conv = fileConverter.value
@@ -79,5 +82,5 @@ lazy val dev = project
 // -coverage-out is scoped to this alias only and is not in the normal test job.
 addCommandAlias(
   "crap",
-  "; set ThisBuild / Compile / scalacOptions += \"-coverage-out:target/coverage\"; clean; test; runtime/dumpClasspath; dev/dumpClasspath"
+  "; set ThisBuild / Compile / scalacOptions += \"-coverage-out:target/coverage\"; clean; runtime/makeCoverageDir; dev/makeCoverageDir; test; runtime/dumpClasspath; dev/dumpClasspath"
 )
