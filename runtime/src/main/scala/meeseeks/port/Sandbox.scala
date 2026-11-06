@@ -12,3 +12,7 @@ enum SandboxError:
 /** Port: run a command in an isolated container sandbox. */
 trait Sandbox:
   def run(command: String): SandboxResult < (Sync & Abort[SandboxError])
+
+  /** Run pre-split args without shell-word splitting. Default delegates to run. */
+  def runArgs(args: List[String]): SandboxResult < (Sync & Abort[SandboxError]) =
+    run(args.mkString(" "))
