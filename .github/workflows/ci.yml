@@ -90,7 +90,7 @@ jobs:
       - run: sbt crap
       - uses: tomiwu/crap4s@v0.2.1
         with:
-          tasty: runtime/target/scala-3.10.0/classes dev/target/scala-3.10.0/classes
+          tasty: target/out/jvm/scala-3.10.0/meeseeks-runtime/classes target/out/jvm/scala-3.10.0/meeseeks-dev/classes
           coverage: runtime/target/coverage dev/target/coverage
           classpath-file: dev/target/classpath.txt
           threshold: "6"
