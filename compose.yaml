@@ -1,0 +1,43 @@
+# v1 infra: prepare the journal directory and mTLS certs.
+# The Meeseeks server runs on the host via sbt "runtime/run"; it is NOT in this Compose file.
+# Run: ./setup.sh  (which calls docker compose up -d for you)
+
+services:
+  journal-init:
+    # Ensure ./data/journal exists with restricted permissions.
+    image: busybox:1.36
+    volumes:
+      - ./data/journal:/journal
+    command: ["sh", "-c", "chmod 700 /journal && echo 'journal-init: ready'"]
+    restart: "no"
+
+  cert-helper:
+    # Generate mTLS certs for Pekko Artery SSL into ./certs/.
+    # Skips generation when server.p12 already exists (idempotent).
+    # Password for all keystores: meeseeks-dev (local development only; not a production secret).
+    image: eclipse-temurin:25-jre-alpine
+    volumes:
+      - ./certs:/certs
+    command:
+      - sh
+      - -ec
+      - |
+        if [ -f /certs/server.p12 ]; then echo 'cert-helper: certs exist, skipping'; exit 0; fi
+        keytool -genkeypair -alias server -keyalg RSA -keysize 2048 -validity 3650 \
+          -dname CN=server -keystore /certs/server.p12 -storetype PKCS12 \
+          -storepass meeseeks-dev -keypass meeseeks-dev -noprompt
+        keytool -genkeypair -alias worker -keyalg RSA -keysize 2048 -validity 3650 \
+          -dname CN=worker -keystore /certs/worker.p12 -storetype PKCS12 \
+          -storepass meeseeks-dev -keypass meeseeks-dev -noprompt
+        keytool -exportcert -alias server -keystore /certs/server.p12 \
+          -storepass meeseeks-dev -file /certs/server.crt -rfc
+        keytool -exportcert -alias worker -keystore /certs/worker.p12 \
+          -storepass meeseeks-dev -file /certs/worker.crt -rfc
+        keytool -importcert -noprompt -alias server -keystore /certs/server-trust.p12 \
+          -storetype PKCS12 -storepass meeseeks-dev -file /certs/server.crt
+        keytool -importcert -noprompt -alias worker -keystore /certs/server-trust.p12 \
+          -storetype PKCS12 -storepass meeseeks-dev -file /certs/worker.crt
+        keytool -importcert -noprompt -alias server -keystore /certs/worker-trust.p12 \
+          -storetype PKCS12 -storepass meeseeks-dev -file /certs/server.crt
+        echo 'cert-helper: certs generated'
+    restart: "no"
