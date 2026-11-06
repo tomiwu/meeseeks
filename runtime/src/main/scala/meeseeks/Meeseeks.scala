@@ -76,8 +76,11 @@ object Meeseeks:
 
         timers.startTimerAtFixedRate(HeartbeatTick, heartbeatInterval)
 
-        // Query solved work before asking for the first permit.
-        overseer ! Overseer.QuerySolvedWork(task.goal, solvedWorkAdapter)
+        // Top-level Meeseeks only: query solved work before the first permit.
+        // Children are always spawned to do new work; skip the cache check so
+        // a sibling's completed result cannot short-circuit a pending child.
+        if parentId.isEmpty then overseer ! Overseer.QuerySolvedWork(task.goal, solvedWorkAdapter)
+        else overseer ! Overseer.AskPermit(id, permitAdapter)
 
         def runStep(): Unit =
           context.pipeToSelf(KyoStep.runStep(brain, oracle, task, stepConfig)) {
@@ -111,8 +114,8 @@ object Meeseeks:
         def reportSuccess(output: String): Behavior[Command] =
           parentId match
             case Some(pid) =>
+              // Children report to their parent; the parent decides when the goal is solved.
               overseer ! Overseer.ChildDone(id, pid, output)
-              overseer ! Overseer.RecordSolvedWork(task.goal, output)
             case None =>
               resultSink ! s"Task complete: $output"
               overseer ! Overseer.RecordSolvedWork(task.goal, output)

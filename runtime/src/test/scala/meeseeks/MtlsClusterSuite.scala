@@ -5,6 +5,7 @@ import meeseeks.cluster.WorkerLeaseMonitor
 import org.apache.pekko.actor.Address
 import org.apache.pekko.actor.typed.*
 import org.apache.pekko.actor.typed.scaladsl.*
+import org.apache.pekko.cluster.MemberStatus
 import org.apache.pekko.cluster.typed.Cluster
 import scala.concurrent.Await
 import scala.concurrent.Promise
@@ -23,11 +24,24 @@ class MtlsClusterSuite extends munit.FunSuite:
 
   private val sysName = "MeeseeksCluster"
 
-  private val seedPort = 25530
-  private val validWorkerPort = 25531
-  private val rogueWorkerPort = 25532
-  private val at2SeedPort = 25535
-  private val at2WorkerPort = 25536
+  /** Allocate a free TCP port by opening and immediately closing a socket.
+    *
+    * Each test call gets a unique port so parallel or repeated runs do not clash.
+    */
+  private def freePort(): Int =
+    val s = new java.net.ServerSocket(0)
+    val p = s.getLocalPort
+    s.close()
+    p
+
+  /** Poll until port appears as Up in cluster or the timeout passes. Each poll sleeps 200 ms. */
+  private def awaitMember(cluster: Cluster, port: Int, timeout: FiniteDuration): Unit =
+    val deadline = System.nanoTime() + timeout.toNanos
+    while (
+      !cluster.state.members.exists(m =>
+        m.address.port.contains(port) && m.status == MemberStatus.Up
+      ) && System.nanoTime() < deadline
+    ) Thread.sleep(200)
 
   private def tlsConfig(
       port: Int,
@@ -79,25 +93,25 @@ class MtlsClusterSuite extends munit.FunSuite:
       .withFallback(ConfigFactory.load())
 
   test("AC1-AC2: valid-certificate worker joins cluster and runs work") {
+    val sp = freePort()
+    val wp = freePort()
     val received = Promise[String]()
 
     val serverSys = ActorSystem[Nothing](
       ClusterSuite.echoGuardian,
       sysName,
-      tlsConfig(seedPort, seedPort, pki.server.keystorePath, pki.server.truststorePath)
+      tlsConfig(sp, sp, pki.server.keystorePath, pki.server.truststorePath)
     )
     val workerSys = ActorSystem[Nothing](
       ClusterSuite.clientGuardian(received),
       sysName,
-      tlsConfig(
-        validWorkerPort,
-        seedPort,
-        pki.validWorker.keystorePath,
-        pki.validWorker.truststorePath
-      )
+      tlsConfig(wp, sp, pki.validWorker.keystorePath, pki.validWorker.truststorePath)
     )
 
     try
+      // Wait for the worker to see the server as Up before checking the echo reply.
+      // This decouples cluster-formation time from the echo exchange timeout.
+      awaitMember(Cluster(workerSys), sp, 60.seconds)
       val reply = Await.result(received.future, 30.seconds)
       assertEquals(reply, "pong:hello")
     finally
@@ -109,22 +123,18 @@ class MtlsClusterSuite extends munit.FunSuite:
   }
 
   test("AC1: worker with invalid certificate cannot join") {
-    val serverSeed = seedPort + 10
+    val sp = freePort()
+    val rp = freePort()
 
     val serverSys = ActorSystem[Nothing](
       Behaviors.empty[Nothing],
       sysName,
-      tlsConfig(serverSeed, serverSeed, pki.server.keystorePath, pki.server.truststorePath)
+      tlsConfig(sp, sp, pki.server.keystorePath, pki.server.truststorePath)
     )
     val rogueSys = ActorSystem[Nothing](
       Behaviors.empty[Nothing],
       sysName,
-      tlsConfig(
-        rogueWorkerPort,
-        serverSeed,
-        pki.rogueWorker.keystorePath,
-        pki.rogueWorker.truststorePath
-      )
+      tlsConfig(rp, sp, pki.rogueWorker.keystorePath, pki.rogueWorker.truststorePath)
     )
 
     try
@@ -135,8 +145,8 @@ class MtlsClusterSuite extends munit.FunSuite:
       // The rogue worker must not appear as an Up member on the server.
       assert(
         !members.exists { m =>
-          m.address.port.contains(rogueWorkerPort) &&
-          m.status == org.apache.pekko.cluster.MemberStatus.Up
+          m.address.port.contains(rp) &&
+          m.status == MemberStatus.Up
         },
         s"Rogue worker joined but should have been rejected. Members: $members"
       )
@@ -151,14 +161,16 @@ class MtlsClusterSuite extends munit.FunSuite:
   test("AT2: worker stops itself after leaseDuration without server contact") {
     val leaseDuration = 3.seconds
     val tickInterval = 1.second
+    val sp = freePort()
+    val wp = freePort()
 
     val serverSys = ActorSystem[Nothing](
       Behaviors.empty[Nothing],
       sysName,
-      tlsConfig(at2SeedPort, at2SeedPort, pki.server.keystorePath, pki.server.truststorePath)
+      tlsConfig(sp, sp, pki.server.keystorePath, pki.server.truststorePath)
     )
 
-    val serverAddress = Address("pekko", sysName, "127.0.0.1", at2SeedPort)
+    val serverAddress = Address("pekko", sysName, "127.0.0.1", sp)
 
     val workerGuardian: Behavior[Nothing] =
       Behaviors.setup[Nothing] { ctx =>
@@ -172,22 +184,18 @@ class MtlsClusterSuite extends munit.FunSuite:
     val workerSys = ActorSystem[Nothing](
       workerGuardian,
       sysName,
-      tlsConfig(
-        at2WorkerPort,
-        at2SeedPort,
-        pki.validWorker.keystorePath,
-        pki.validWorker.truststorePath
-      )
+      tlsConfig(wp, sp, pki.validWorker.keystorePath, pki.validWorker.truststorePath)
     )
 
     try
-      // Wait for both nodes to join.
-      Thread.sleep(5000)
+      // Wait until the worker sees the server as Up before cutting contact.
+      awaitMember(Cluster(workerSys), sp, 30.seconds)
 
-      // Verify the worker sees the server as Up before cutting contact.
+      // Verify membership with a clear condition (awaitMember already guarantees this
+      // unless the timeout passed, so the assert catches that case explicitly).
       val workerCluster = Cluster(workerSys)
       assert(
-        workerCluster.state.members.exists(_.address.port.contains(at2SeedPort)),
+        workerCluster.state.members.exists(_.address.port.contains(sp)),
         "Worker must see the server as a cluster member before the AT2 cut"
       )
 
