@@ -18,3 +18,4 @@ project/project/
 *.class
 node_modules/
 data/
+certs/
