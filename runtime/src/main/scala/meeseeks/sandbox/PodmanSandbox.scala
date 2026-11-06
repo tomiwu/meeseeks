@@ -23,10 +23,13 @@ import scala.jdk.CollectionConverters.*
 final class PodmanSandbox(config: SandboxConfig) extends Sandbox:
 
   override def run(command: String): SandboxResult < (Sync & Abort[SandboxError]) =
+    runArgs(splitCommand(command))
+
+  override def runArgs(commandArgs: List[String]): SandboxResult < (Sync & Abort[SandboxError]) =
     Sync.defer:
       val envFilePath: Option[java.nio.file.Path] = config.credential.map(writeEnvFile)
       try
-        val args = buildArgs(command, envFilePath.map(_.toString))
+        val args = buildArgs(commandArgs, envFilePath.map(_.toString))
         val pb = new ProcessBuilder(args.asJava)
         val _ = pb.redirectErrorStream(false)
         try
@@ -52,7 +55,7 @@ final class PodmanSandbox(config: SandboxConfig) extends Sandbox:
             Abort.fail(SandboxError.Timeout("container interrupted"))
       finally envFilePath.foreach(p => { val _ = Files.deleteIfExists(p) })
 
-  private def buildArgs(command: String, envFile: Option[String]): List[String] =
+  private def buildArgs(commandArgs: List[String], envFile: Option[String]): List[String] =
     val envArgs = envFile.fold(List.empty[String])(path => List(s"--env-file=$path"))
     List(
       "podman",
@@ -61,7 +64,7 @@ final class PodmanSandbox(config: SandboxConfig) extends Sandbox:
       "--read-only",
       s"--volume=${config.taskDir.toAbsolutePath}:${config.workDir}:ro",
       s"--workdir=${config.workDir}"
-    ) ++ envArgs ++ List(config.image) ++ splitCommand(command)
+    ) ++ envArgs ++ List(config.image) ++ commandArgs
 
   private def writeEnvFile(cred: Credential): java.nio.file.Path =
     val tmp = Files.createTempFile("sandbox-cred-", ".env")

@@ -5,6 +5,13 @@ import com.typesafe.config.ConfigFactory
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kyo.*
+import meeseeks.brain.ApiKeyBrain
+import meeseeks.brain.BackendKind
+import meeseeks.brain.BrainConfig
+import meeseeks.brain.LiveBrainRegistry
+import meeseeks.brain.LiveHttpSender
+import meeseeks.brain.LocalModelBrain
+import meeseeks.brain.SubscriptionBrain
 import meeseeks.channel.LiveTelegramApi
 import meeseeks.channel.TelegramChat
 import meeseeks.port.*
@@ -185,14 +192,7 @@ def startFromEnv(env: Map[String, String]): Unit =
   val ownerId = requireEnv(env, "MEESEEKS_OWNER_ID")
   val rawPath = env.getOrElse("MEESEEKS_JOURNAL_PATH", "./data/journal")
   val writerId = env.getOrElse("MEESEEKS_WRITER_ID", "prod-1")
-  val brainMode = env.getOrElse("MEESEEKS_BRAIN", "")
-
-  if brainMode != "fake" then
-    System.err.println(
-      "[meeseeks] no live brain adapter yet. " +
-        "Set MEESEEKS_BRAIN=fake for smoke testing, or wait for issue #63."
-    )
-    sys.exit(1)
+  val brainMode = env.getOrElse("MEESEEKS_BRAIN", "subscription")
 
   val ownerIdLong = ownerId.toLongOption.getOrElse {
     System.err.println("[meeseeks] MEESEEKS_OWNER_ID must be a numeric chat ID")
@@ -211,13 +211,52 @@ def startFromEnv(env: Map[String, String]): Unit =
   )
   val pekkoConfig = overrides.withFallback(ConfigFactory.load())
 
-  val credential = Credential("MEESEEKS_TELEGRAM_BOT_TOKEN", tokenVal)
-  val api = new LiveTelegramApi(credential)
+  val telegramCred = Credential("MEESEEKS_TELEGRAM_BOT_TOKEN", tokenVal)
+  val api = new LiveTelegramApi(telegramCred)
   val chat = new TelegramChat(api, ownerIdLong)
 
-  Server.start(
-    ServerConfig(writerId, ownerId, chat, SmokeOnlyBrain, SmokeOnlyOracle, pekkoConfig)
+  val brain: Brain = brainMode match
+    case "fake" =>
+      SmokeOnlyBrain
+    case "subscription" | "" =>
+      buildSubscriptionBrain(env)
+    case "apikey" =>
+      buildApiKeyBrain(env)
+    case "local" =>
+      buildLocalModelBrain(env)
+    case other =>
+      System.err.println(
+        s"[meeseeks] unknown MEESEEKS_BRAIN value: $other; use fake/subscription/apikey/local"
+      )
+      sys.exit(1)
+
+  Server.start(ServerConfig(writerId, ownerId, chat, brain, SmokeOnlyOracle, pekkoConfig))
+
+private def buildSubscriptionBrain(env: Map[String, String]): Brain =
+  val image = env.getOrElse("MEESEEKS_SANDBOX_IMAGE", "meeseeks/brain:latest")
+  val credOpt = env
+    .get("MEESEEKS_BRAIN_SUBSCRIPTION_CREDENTIAL")
+    .map(v => Credential("ANTHROPIC_API_KEY", v))
+  SubscriptionBrain.live(image, credOpt)
+
+private def buildApiKeyBrain(env: Map[String, String]): Brain =
+  val key = env.getOrElse(
+    "MEESEEKS_BRAIN_API_KEY", {
+      System.err.println(
+        "[meeseeks] MEESEEKS_BRAIN=apikey requires MEESEEKS_BRAIN_API_KEY to be set"
+      )
+      sys.exit(1)
+    }
   )
+  val model = env.getOrElse("MEESEEKS_BRAIN_API_MODEL", ApiKeyBrain.defaultModel)
+  val sender = LiveHttpSender()
+  new ApiKeyBrain(Credential("MEESEEKS_BRAIN_API_KEY", key), sender, model)
+
+private def buildLocalModelBrain(env: Map[String, String]): Brain =
+  val host = env.getOrElse("MEESEEKS_LOCAL_MODEL_HOST", LocalModelBrain.defaultHost)
+  val model = env.getOrElse("MEESEEKS_LOCAL_MODEL_NAME", LocalModelBrain.defaultModel)
+  val sender = LiveHttpSender()
+  new LocalModelBrain(host, model, sender)
 
 private def requireEnv(env: Map[String, String], name: String): String =
   env.getOrElse(
