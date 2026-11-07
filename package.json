@@ -7,7 +7,7 @@
   },
   "scripts": {
     "sandcastle": "npx tsx .sandcastle/main.mts",
-    "test:pick": "npx tsx .sandcastle/pick.test.mts"
+    "test:pick": "npx tsx .sandcastle/pick.test.mts && npx tsx .sandcastle/retry.test.mts"
   },
   "repository": {
     "type": "git",
