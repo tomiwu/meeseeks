@@ -1,5 +1,6 @@
 package meeseeks.jev
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.net.URI
 import java.net.http.HttpClient
@@ -57,27 +58,80 @@ final class LiveJevClient(config: JevConfig, http: HttpClient, mapper: ObjectMap
   ): OracleVerdict < (Sync & Abort[OracleError]) =
     if response.statusCode() == 401 then
       Abort.fail(OracleError.Unavailable("Jev: unauthorized — check the API key"))
-    else if response.statusCode() != 200 then
+    else parseOtherStatus(response)
+
+  private def parseOtherStatus(
+      response: HttpResponse[String]
+  ): OracleVerdict < (Sync & Abort[OracleError]) =
+    if response.statusCode() != 200 then
       Abort.fail(OracleError.Unavailable(s"Jev: unexpected status ${response.statusCode()}"))
-    else
-      val rootOrError: Either[OracleError, com.fasterxml.jackson.databind.JsonNode] =
-        try Right(mapper.readTree(response.body()))
-        catch
-          case e: Exception =>
-            Left(OracleError.Unavailable(s"Jev: invalid JSON response: ${e.getMessage}"))
-      rootOrError match
-        case Left(err) => Abort.fail(err)
-        case Right(root) =>
-          val verdict = Option(root.get("verdict")).map(_.asText()).getOrElse("")
-          val reason = Option(root.get("reason")).map(_.asText()).getOrElse("")
-          val highConf = Option(root.get("highConfidence")).exists(_.asBoolean())
-          verdict match
-            case "pass"     => OracleVerdict.Pass
-            case "fail"     => OracleVerdict.Fail(reason)
-            case "unsure"   => OracleVerdict.Unsure(reason)
-            case "stop"     => OracleVerdict.Stop(reason, highConf)
-            case "continue" => OracleVerdict.Continue
-            case other => Abort.fail(OracleError.InvalidInput(s"Jev: unknown verdict '$other'"))
+    else parseBody(response.body())
+
+  private def parseBody(body: String): OracleVerdict < (Sync & Abort[OracleError]) =
+    readVerdictTree(body) match
+      case Left(err)   => Abort.fail(err)
+      case Right(root) => verdictFrom(root)
+
+  private def readVerdictTree(body: String): Either[OracleError, JsonNode] =
+    try Right(mapper.readTree(body))
+    catch
+      case e: Exception =>
+        Left(OracleError.Unavailable(s"Jev: invalid JSON response: ${e.getMessage}"))
+
+  private def verdictFrom(root: JsonNode): OracleVerdict < (Sync & Abort[OracleError]) =
+    val verdict = Option(root.get("verdict")).map(_.asText()).getOrElse("")
+    val reason = Option(root.get("reason")).map(_.asText()).getOrElse("")
+    val highConf = Option(root.get("highConfidence")).exists(_.asBoolean())
+    knownVerdict(verdict, reason, highConf)
+
+  private def knownVerdict(
+      verdict: String,
+      reason: String,
+      highConf: Boolean
+  ): OracleVerdict < (Sync & Abort[OracleError]) =
+    verdictTable.get(verdict) match
+      case Some(make) => make(reason, highConf)
+      case None       => Abort.fail(OracleError.InvalidInput(s"Jev: unknown verdict '$verdict'"))
+
+  private def verdictTable
+      : Map[String, (String, Boolean) => OracleVerdict < (Sync & Abort[OracleError])] =
+    Map(
+      "pass" -> passVerdict,
+      "fail" -> failVerdict,
+      "unsure" -> unsureVerdict,
+      "stop" -> stopVerdict,
+      "continue" -> continueVerdict
+    )
+
+  private def passVerdict(
+      reason: String,
+      highConf: Boolean
+  ): OracleVerdict < (Sync & Abort[OracleError]) =
+    OracleVerdict.Pass
+
+  private def failVerdict(
+      reason: String,
+      highConf: Boolean
+  ): OracleVerdict < (Sync & Abort[OracleError]) =
+    OracleVerdict.Fail(reason)
+
+  private def unsureVerdict(
+      reason: String,
+      highConf: Boolean
+  ): OracleVerdict < (Sync & Abort[OracleError]) =
+    OracleVerdict.Unsure(reason)
+
+  private def stopVerdict(
+      reason: String,
+      highConf: Boolean
+  ): OracleVerdict < (Sync & Abort[OracleError]) =
+    OracleVerdict.Stop(reason, highConf)
+
+  private def continueVerdict(
+      reason: String,
+      highConf: Boolean
+  ): OracleVerdict < (Sync & Abort[OracleError]) =
+    OracleVerdict.Continue
 
 end LiveJevClient
 

@@ -3,6 +3,7 @@ package meeseeks
 import kyo.*
 import meeseeks.port.Chat
 import meeseeks.port.ChatError
+import meeseeks.port.ChatMessage
 
 /** Reads one chat message and turns it into a Task, refuses it, or ignores it.
   *
@@ -12,13 +13,16 @@ import meeseeks.port.ChatError
 final class Gateway(ownerId: String, chat: Chat):
 
   def readTask(): Option[Task] < (Sync & Abort[ChatError]) =
-    chat.receive().flatMap { msg =>
-      if msg.sender != ownerId then (None: Option[Task])
-      else
-        Gateway.parse(msg.text) match
-          case Some(task) => (Some(task): Option[Task])
-          case None       => chat.send(Gateway.refusalText).map(_ => (None: Option[Task]))
-    }
+    chat.receive().flatMap(decide)
+
+  private def decide(msg: ChatMessage): Option[Task] < (Sync & Abort[ChatError]) =
+    if msg.sender != ownerId then (None: Option[Task])
+    else taskOrRefusal(msg.text)
+
+  private def taskOrRefusal(text: String): Option[Task] < (Sync & Abort[ChatError]) =
+    Gateway.parse(text) match
+      case Some(task) => (Some(task): Option[Task])
+      case None       => chat.send(Gateway.refusalText).map(_ => (None: Option[Task]))
 
 object Gateway:
 

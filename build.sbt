@@ -16,6 +16,13 @@ ThisBuild / scalacOptions ++= Seq(
   "-Wvalue-discard",
 )
 
+lazy val dumpClasspath = taskKey[Unit]("Write Test/fullClasspath to target/classpath.txt.")
+lazy val makeCoverageDir = taskKey[Unit]("Create target/coverage so the forked JVM can write measurements.")
+lazy val coverageEnabled = settingKey[Boolean]("Add an absolute -coverage-out path for each module.")
+
+// False for the normal test job. The crap alias sets this to true.
+ThisBuild / coverageEnabled := false
+
 lazy val root = project
   .in(file("."))
   .aggregate(runtime, dev)
@@ -49,6 +56,20 @@ lazy val runtime = project
       "org.apache.pekko" %% "pekko-persistence-testkit" % pekkoV % Test,
       "org.scalameta" %% "munit" % munitV % Test,
     ),
+    Compile / scalacOptions ++= {
+      if (coverageEnabled.value) {
+        val dir = (baseDirectory.value / "target" / "coverage").getAbsolutePath
+        Seq("-coverage-out:" + dir)
+      } else Nil
+    },
+    makeCoverageDir := IO.createDirectory(baseDirectory.value / "target" / "coverage"),
+    dumpClasspath := {
+      val cp = (Test / fullClasspath).value
+      val conv = fileConverter.value
+      val out = baseDirectory.value / "target" / "classpath.txt"
+      IO.createDirectory(out.getParentFile)
+      IO.write(out, cp.map(a => conv.toPath(a.data).toAbsolutePath.toString).mkString(java.io.File.pathSeparator))
+    },
   )
 
 lazy val dev = project
@@ -59,7 +80,27 @@ lazy val dev = project
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitV % Test,
     ),
+    Compile / scalacOptions ++= {
+      if (coverageEnabled.value) {
+        val dir = (baseDirectory.value / "target" / "coverage").getAbsolutePath
+        Seq("-coverage-out:" + dir)
+      } else Nil
+    },
+    makeCoverageDir := IO.createDirectory(baseDirectory.value / "target" / "coverage"),
+    dumpClasspath := {
+      val cp = (Test / fullClasspath).value
+      val conv = fileConverter.value
+      val out = baseDirectory.value / "target" / "classpath.txt"
+      IO.createDirectory(out.getParentFile)
+      IO.write(out, cp.map(a => conv.toPath(a.data).toAbsolutePath.toString).mkString(java.io.File.pathSeparator))
+    },
   )
 
-// crap: run the test suite for each Scala version in crossScalaVersions.
-addCommandAlias("crap", "+test")
+// crap: compile with coverage, run tests, dump classpath for crap4s.
+// -coverage-out is scoped to this alias only and is not in the normal test job.
+// Use an absolute path per module. A relative path is resolved from the sbt root
+// for the compiler and from the module directory for the forked tests.
+addCommandAlias(
+  "crap",
+  "; set ThisBuild / coverageEnabled := true; clean; runtime/makeCoverageDir; dev/makeCoverageDir; test; runtime/dumpClasspath; dev/dumpClasspath"
+)

@@ -20,24 +20,30 @@ final class BuildCheckOracle(
 ) extends Oracle:
 
   override def judge(input: OracleInput): OracleVerdict < (Sync & Abort[OracleError]) =
-    Sync
-      .defer {
-        guard.detectChange()
-      }
-      .flatMap {
-        case Some(reason) =>
-          OracleVerdict.Fail(s"test file changed by code writer: $reason")
-        case None =>
-          Abort.run[CheckError](runner.run(checkCommand)).flatMap { r =>
-            r.fold(
-              {
-                case CheckResult.Pass    => OracleVerdict.Pass
-                case CheckResult.Fail(s) => OracleVerdict.Fail(s)
-              },
-              e => Abort.fail(OracleError.Unavailable(e.toString)),
-              t => Abort.fail(OracleError.Unavailable(t.getMessage))
-            )
-          }
-      }
+    Sync.defer(guard.detectChange()).flatMap(onGuard)
+
+  private def onGuard(change: Option[String]): OracleVerdict < (Sync & Abort[OracleError]) =
+    change match
+      case Some(reason) => OracleVerdict.Fail(s"test file changed by code writer: $reason")
+      case None         => runCheck()
+
+  private def runCheck(): OracleVerdict < (Sync & Abort[OracleError]) =
+    Abort.run[CheckError](runner.run(checkCommand)).flatMap(onRun)
+
+  private def onRun(
+      r: Result[CheckError, CheckResult]
+  ): OracleVerdict < (Sync & Abort[OracleError]) =
+    r.fold(onCheckResult, onCheckError, onCheckPanic)
+
+  private def onCheckResult(result: CheckResult): OracleVerdict =
+    result match
+      case CheckResult.Pass    => OracleVerdict.Pass
+      case CheckResult.Fail(s) => OracleVerdict.Fail(s)
+
+  private def onCheckError(e: CheckError): OracleVerdict < (Sync & Abort[OracleError]) =
+    Abort.fail(OracleError.Unavailable(e.toString))
+
+  private def onCheckPanic(t: Throwable): OracleVerdict < (Sync & Abort[OracleError]) =
+    Abort.fail(OracleError.Unavailable(t.getMessage))
 
 end BuildCheckOracle

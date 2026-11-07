@@ -1,5 +1,6 @@
 package meeseeks.channel
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import kyo.*
 import meeseeks.port.ChatError
@@ -26,36 +27,43 @@ final class LiveTelegramApi(credential: Credential) extends TelegramApi:
 
   override def pollUpdates(offset: Long): List[TelegramUpdate] < (Sync & Abort[ChatError]) =
     Sync.defer {
-      val url =
-        s"$baseUrl/getUpdates?offset=$offset&timeout=25&allowed_updates=%5B%22message%22%5D"
-      val req = HttpRequest.newBuilder(URI.create(url)).GET().build()
-      val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
+      val resp = http.send(updatesRequest(offset), HttpResponse.BodyHandlers.ofString())
       if resp.statusCode() != 200 then
         Abort.fail(ChatError.Disconnected(s"Telegram getUpdates returned ${resp.statusCode()}"))
-      else
-        val root = mapper.readTree(resp.body())
-        if !root.path("ok").asBoolean(false) then
-          Abort.fail(ChatError.Disconnected("Telegram response not ok"))
-        else
-          val results = root.path("result")
-          (0 until results.size()).toList.flatMap { i =>
-            val upd = results.get(i)
-            val msg = upd.path("message")
-            if msg.isMissingNode then None
-            else
-              val text = msg.path("text").asText("")
-              if text.isEmpty then None
-              else
-                Some(
-                  TelegramUpdate(
-                    updateId = upd.path("update_id").asLong(),
-                    fromId = msg.path("from").path("id").asLong().toString,
-                    chatId = msg.path("chat").path("id").asLong(),
-                    text = text
-                  )
-                )
-          }
+      else updatesFromBody(resp.body())
     }
+
+  private def updatesRequest(offset: Long): HttpRequest =
+    val url =
+      s"$baseUrl/getUpdates?offset=$offset&timeout=25&allowed_updates=%5B%22message%22%5D"
+    HttpRequest.newBuilder(URI.create(url)).GET().build()
+
+  private def updatesFromBody(body: String): List[TelegramUpdate] < (Sync & Abort[ChatError]) =
+    val root = mapper.readTree(body)
+    if !root.path("ok").asBoolean(false) then
+      Abort.fail(ChatError.Disconnected("Telegram response not ok"))
+    else readUpdates(root.path("result"))
+
+  private def readUpdates(results: JsonNode): List[TelegramUpdate] =
+    (0 until results.size()).toList.flatMap(i => oneUpdate(results.get(i)))
+
+  private def oneUpdate(upd: JsonNode): Option[TelegramUpdate] =
+    val msg = upd.path("message")
+    if msg.isMissingNode then None
+    else updateFromMessage(upd, msg)
+
+  private def updateFromMessage(upd: JsonNode, msg: JsonNode): Option[TelegramUpdate] =
+    val text = msg.path("text").asText("")
+    if text.isEmpty then None
+    else Some(toUpdate(upd, msg, text))
+
+  private def toUpdate(upd: JsonNode, msg: JsonNode, text: String): TelegramUpdate =
+    TelegramUpdate(
+      updateId = upd.path("update_id").asLong(),
+      fromId = msg.path("from").path("id").asLong().toString,
+      chatId = msg.path("chat").path("id").asLong(),
+      text = text
+    )
 
   override def sendMessage(chatId: Long, text: String): Unit < (Sync & Abort[ChatError]) =
     Sync.defer {

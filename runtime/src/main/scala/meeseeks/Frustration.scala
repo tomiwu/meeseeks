@@ -51,12 +51,13 @@ final class FrustrationTracker(config: FrustrationConfig, clock: Clock):
 
   def level: FrustrationLevel =
     val elapsed = clock.currentTimeMillis() - startMillis
-    if failedChecks >= config.stuckAfterFails || elapsed >= config.stuckAfterMillis then
-      FrustrationLevel.Stuck
-    else if failedChecks >= config.desperateAfterFails || elapsed >= config.desperateAfterMillis
-    then FrustrationLevel.Desperate
-    else if failedChecks >= config.frustratedAfterFails || elapsed >= config.frustratedAfterMillis
-    then FrustrationLevel.Frustrated
-    else if failedChecks >= config.worriedAfterFails || elapsed >= config.worriedAfterMillis then
-      FrustrationLevel.Worried
-    else FrustrationLevel.Calm
+    thresholds
+      .find { case (failLimit, msLimit, _) => failedChecks >= failLimit || elapsed >= msLimit }
+      .fold(FrustrationLevel.Calm)(_._3)
+
+  private val thresholds: List[(Int, Long, FrustrationLevel)] = List(
+    (config.stuckAfterFails, config.stuckAfterMillis, FrustrationLevel.Stuck),
+    (config.desperateAfterFails, config.desperateAfterMillis, FrustrationLevel.Desperate),
+    (config.frustratedAfterFails, config.frustratedAfterMillis, FrustrationLevel.Frustrated),
+    (config.worriedAfterFails, config.worriedAfterMillis, FrustrationLevel.Worried)
+  )
