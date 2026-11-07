@@ -38,6 +38,8 @@ jobs:
             ~/.sbt
             ~/.cache/coursier
           key: ${{ runner.os }}-sbt-${{ hashFiles('**/build.sbt', '**/project/build.properties', '**/project/plugins.sbt') }}
+      - name: Ban Thread.sleep outside fake helpers
+        run: scripts/check-no-thread-sleep.sh
       - run: sbt +compile
 
   test:

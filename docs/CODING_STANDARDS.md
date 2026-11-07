@@ -122,6 +122,14 @@ Each rule has one reason. Source tags:
       Right(Mapped(mapCoverage(in.units, in.statements)))
     ```
 
+### 2.1 No Thread.sleep
+
+Do not use `Thread.sleep` in `src/main` or in tests. This includes `java.lang.Thread.sleep` and any import alias of it. Only test mocks and fakes in a `fake/` directory (for example `runtime/src/test/scala/meeseeks/fake/`) may use it, for scripted delays.
+
+Everywhere else, wait for a condition: a `Promise`, a `Future`, `Await`, a callback, a Pekko test probe (`awaitAssert`, `expectNoMessage`), or a scheduled timer. For a retry or backoff, schedule the retry with the Pekko scheduler. Do not wait a fixed time and hope the system is ready.
+
+CI enforces this rule. The `lint` job runs `scripts/check-no-thread-sleep.sh`. It fails when a `*.scala` file outside `**/fake/**` contains `Thread.sleep`. It does not scan `target/`.
+
 ## 3. Formatting (scalafmt)
 
 Proposed `.scalafmt.conf` in the repository root (scalafmt 3.11.5 is the newest release on Maven Central on 2026-10-20):
@@ -209,4 +217,4 @@ Risk: the plugin version must match the exact Scala version, so each Scala updat
 
 ## 5. CI gate
 
-On each pull request, GitHub Actions runs: format check, compile with `-Werror`, Scalafix check, tests, and the crap4s check (CRAP score below 6 for every unit, using `--threshold 6`). The Sandcastle loop merges a PR only when all checks pass.
+On each pull request, GitHub Actions runs: the Thread.sleep check, format check, compile with `-Werror`, Scalafix check, tests, and the crap4s check (CRAP score below 6 for every unit, using `--threshold 6`). The Sandcastle loop merges a PR only when all checks pass.

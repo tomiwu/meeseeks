@@ -7,6 +7,7 @@ import meeseeks.fake.FakeOracle
 import meeseeks.port.ChatError
 import meeseeks.port.ChatMessage
 import meeseeks.port.OracleVerdict
+import org.apache.pekko.actor.testkit.typed.scaladsl.ActorTestKit
 import scala.concurrent.Await
 import scala.concurrent.duration.*
 
@@ -19,6 +20,18 @@ class MainSuite extends munit.FunSuite:
 
   override val munitTimeout: Duration = 30.seconds
 
+  private val kit = ActorTestKit()
+
+  override def afterAll(): Unit = kit.shutdownTestKit()
+
+  private def fakeChat(config: ServerConfig): FakeChat = config.chat match
+    case f: FakeChat => f
+    case other       => fail(s"expected FakeChat, got $other")
+
+  /** Wait with a Pekko probe until the condition holds. Fail at the timeout. */
+  private def awaitCondition(what: String)(cond: => Boolean): Unit =
+    kit.createTestProbe[Any]().awaitAssert(assert(cond, what), 10.seconds)
+
   test("Server boots with fake components and in-memory H2 then stops cleanly") {
     val config = ServerConfig(
       writerId = "test-main-1",
@@ -30,7 +43,7 @@ class MainSuite extends munit.FunSuite:
     )
 
     val system = Server.boot(config)
-    Thread.sleep(400L)
+    awaitCondition("chat poll started")(fakeChat(config).receiveCalls.get() > 0)
     system.terminate()
     Await.result(system.whenTerminated, 10.seconds)
   }
@@ -47,8 +60,10 @@ class MainSuite extends munit.FunSuite:
     )
 
     val system = Server.boot(config)
-    // Allow the kill message to be processed.
-    Thread.sleep(800L)
+
+    awaitCondition("kill acknowledged")(
+      fakeChat(config).sent.contains("Kill sent. No new permits.")
+    )
     system.terminate()
     Await.result(system.whenTerminated, 10.seconds)
   }
@@ -65,7 +80,7 @@ class MainSuite extends munit.FunSuite:
     )
 
     val system = Server.boot(config)
-    Thread.sleep(400L)
+    awaitCondition("stranger message consumed")(fakeChat(config).receiveCalls.get() > 1)
     system.terminate()
     Await.result(system.whenTerminated, 10.seconds)
   }
@@ -82,7 +97,7 @@ class MainSuite extends munit.FunSuite:
     )
 
     val system = Server.boot(config)
-    Thread.sleep(400L)
+    awaitCondition("resume acknowledged")(fakeChat(config).sent.contains("Breaker resumed."))
     system.terminate()
     Await.result(system.whenTerminated, 10.seconds)
   }
@@ -99,7 +114,7 @@ class MainSuite extends munit.FunSuite:
     )
 
     val system = Server.boot(config)
-    Thread.sleep(1000L)
+    awaitCondition("task accepted")(fakeChat(config).sent.exists(_.endsWith("accepted.")))
     system.terminate()
     Await.result(system.whenTerminated, 10.seconds)
   }
@@ -116,7 +131,7 @@ class MainSuite extends munit.FunSuite:
     )
 
     val system = Server.boot(config)
-    Thread.sleep(400L)
+    awaitCondition("refusal sent")(fakeChat(config).sent.contains(Gateway.refusalText))
     system.terminate()
     Await.result(system.whenTerminated, 10.seconds)
   }
