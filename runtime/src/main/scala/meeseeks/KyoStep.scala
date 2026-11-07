@@ -59,12 +59,19 @@ object KyoStep:
       task: Task
   ): StepResult < (Sync & Abort[BrainError] & Abort[OracleError]) =
     brain.ask(task.goal).flatMap { output =>
-      oracle.judge(OracleInput(task.goal, output)).map {
-        case OracleVerdict.Pass        => StepResult.Passed(output)
-        case OracleVerdict.Stop(r, hc) => StepResult.OracleStop(r, hc)
-        case other                     => StepResult.Failed(other.toString)
-      }
+      oracle.judge(OracleInput(task.goal, output)).map(verdict => verdictToStep(output, verdict))
     }
+
+  private def verdictToStep(output: String, verdict: OracleVerdict): StepResult =
+    verdict match
+      case OracleVerdict.Pass => StepResult.Passed(output)
+      case other              => verdictRest(output, other)
+
+  private def verdictRest(output: String, verdict: OracleVerdict): StepResult =
+    verdict match
+      case OracleVerdict.Stop(reason, highConfidence) =>
+        StepResult.OracleStop(reason, highConfidence)
+      case _ => StepResult.Failed(verdict.toString)
 
   private def runWithRetry(
       brain: Brain,
@@ -73,26 +80,46 @@ object KyoStep:
       retriesLeft: Int
   ): StepResult < Sync =
     Abort.run[BrainError](Abort.run[OracleError](runOnce(brain, oracle, task))).flatMap { outer =>
-      val resultOpt: Option[StepResult] = outer.fold(
-        inner =>
-          inner.fold(
-            result => Some(result),
-            _ => None,
-            _ => Some(StepResult.Failed("oracle panic"))
-          ),
-        {
-          case BrainError.UsageLimit(msg) => Some(StepResult.UsageLimitError(msg))
-          case _                          => None
-        },
-        _ => Some(StepResult.Failed("brain panic"))
-      )
-      val r: StepResult < Sync = resultOpt match
-        case Some(result) => result
-        case None =>
-          if retriesLeft > 0 then runWithRetry(brain, oracle, task, retriesLeft - 1)
-          else StepResult.Failed("step failed after retries")
-      r
+      nextAttempt(brain, oracle, task, retriesLeft, classifyOuter(outer))
     }
+
+  private def classifyOuter(
+      outer: Result[BrainError, Result[OracleError, StepResult]]
+  ): Option[StepResult] =
+    outer.fold(classifyInner, classifyBrain, classifyPanic)
+
+  private def classifyInner(
+      inner: Result[OracleError, StepResult]
+  ): Option[StepResult] =
+    inner.fold(result => Some(result), _ => None, _ => Some(StepResult.Failed("oracle panic")))
+
+  private def classifyBrain(err: BrainError): Option[StepResult] =
+    err match
+      case BrainError.UsageLimit(msg) => Some(StepResult.UsageLimitError(msg))
+      case _                          => None
+
+  private def classifyPanic(t: Throwable): Option[StepResult] =
+    Some(StepResult.Failed("brain panic"))
+
+  private def nextAttempt(
+      brain: Brain,
+      oracle: Oracle,
+      task: Task,
+      retriesLeft: Int,
+      resultOpt: Option[StepResult]
+  ): StepResult < Sync =
+    resultOpt match
+      case Some(result) => result
+      case None         => retryOrFail(brain, oracle, task, retriesLeft)
+
+  private def retryOrFail(
+      brain: Brain,
+      oracle: Oracle,
+      task: Task,
+      retriesLeft: Int
+  ): StepResult < Sync =
+    if retriesLeft > 0 then runWithRetry(brain, oracle, task, retriesLeft - 1)
+    else StepResult.Failed("step failed after retries")
 
   private def withTimeout(
       f: Future[StepResult],

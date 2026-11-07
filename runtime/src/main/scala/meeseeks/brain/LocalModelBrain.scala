@@ -1,5 +1,6 @@
 package meeseeks.brain
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import kyo.*
 import meeseeks.port.Brain
@@ -46,25 +47,37 @@ final class LocalModelBrain(
   private def parseResponse(status: Int, body: String): String < Abort[BrainError] =
     if status == 429 then
       Abort.fail(BrainError.RateLimit(s"local model rate limit (HTTP 429): $body"))
-    else if status != 200 then
-      Abort.fail(BrainError.Unavailable(s"local model returned status $status"))
-    else
-      val rootOrError: Either[BrainError, com.fasterxml.jackson.databind.JsonNode] =
-        try Right(mapper.readTree(body))
-        catch
-          case e: Exception =>
-            Left(BrainError.Unavailable(s"local model: invalid JSON: ${e.getMessage}"))
-      rootOrError match
-        case Left(err) => Abort.fail(err)
-        case Right(root) =>
-          val choices = root.path("choices")
-          if choices.isMissingNode || choices.size() == 0 then
-            Abort.fail(BrainError.Unavailable("local model response has no choices"))
-          else
-            val content = choices.get(0).path("message").path("content").asText("")
-            if content.isEmpty then
-              Abort.fail(BrainError.Unavailable("local model response has empty content"))
-            else content
+    else parseOk(status, body)
+
+  private def parseOk(status: Int, body: String): String < Abort[BrainError] =
+    if status != 200 then Abort.fail(BrainError.Unavailable(s"local model returned status $status"))
+    else contentFrom(body)
+
+  private def contentFrom(body: String): String < Abort[BrainError] =
+    readRoot(body) match
+      case Left(err)   => Abort.fail(err)
+      case Right(root) => choiceText(root)
+
+  private def readRoot(body: String): Either[BrainError, JsonNode] =
+    try Right(mapper.readTree(body))
+    catch
+      case e: Exception =>
+        Left(BrainError.Unavailable(s"local model: invalid JSON: ${e.getMessage}"))
+
+  private def choiceText(root: JsonNode): String < Abort[BrainError] =
+    val choices = root.path("choices")
+    if missingChoices(choices) then
+      Abort.fail(BrainError.Unavailable("local model response has no choices"))
+    else messageText(choices)
+
+  private def missingChoices(choices: JsonNode): Boolean =
+    choices.isMissingNode || choices.size() == 0
+
+  private def messageText(choices: JsonNode): String < Abort[BrainError] =
+    val content = choices.get(0).path("message").path("content").asText("")
+    if content.isEmpty then
+      Abort.fail(BrainError.Unavailable("local model response has empty content"))
+    else content
 
 object LocalModelBrain:
   val defaultHost: String = "http://localhost:11434"

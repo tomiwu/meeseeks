@@ -23,20 +23,32 @@ final class LiveUrlVerifier(http: HttpClient, timeoutSeconds: Int = 10) extends 
 
   override def verify(url: String): UrlStatus < (Sync & Abort[VerifierError]) =
     Sync.defer:
-      val statusCode =
-        try
-          val request = HttpRequest
-            .newBuilder()
-            .uri(URI.create(url))
-            .method("HEAD", HttpRequest.BodyPublishers.noBody())
-            .timeout(Duration.ofSeconds(timeoutSeconds.toLong))
-            .build()
-          http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode()
-        catch case _: Exception => -1
-      statusCode match
-        case s if s >= 200 && s < 300 => UrlStatus.Supported
-        case s if s >= 400 && s < 500 => UrlStatus.NotSupported
-        case _                        => UrlStatus.Unreachable
+      statusToUrl(headStatus(url))
+
+  private def headStatus(url: String): Int =
+    try
+      val request = HttpRequest
+        .newBuilder()
+        .uri(URI.create(url))
+        .method("HEAD", HttpRequest.BodyPublishers.noBody())
+        .timeout(Duration.ofSeconds(timeoutSeconds.toLong))
+        .build()
+      http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode()
+    catch case _: Exception => -1
+
+  private def statusToUrl(code: Int): UrlStatus =
+    if isSupported(code) then UrlStatus.Supported
+    else statusAfterSuccess(code)
+
+  private def statusAfterSuccess(code: Int): UrlStatus =
+    if isNotSupported(code) then UrlStatus.NotSupported
+    else UrlStatus.Unreachable
+
+  private def isSupported(code: Int): Boolean =
+    code >= 200 && code < 300
+
+  private def isNotSupported(code: Int): Boolean =
+    code >= 400 && code < 500
 
 object LiveUrlVerifier:
   def apply(timeoutSeconds: Int = 10): LiveUrlVerifier =

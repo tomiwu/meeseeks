@@ -1,5 +1,6 @@
 package meeseeks.brain
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import kyo.*
 import meeseeks.port.Brain
@@ -55,35 +56,60 @@ final class ApiKeyBrain(
     mapper.writeValueAsString(node)
 
   private def parseResponse(status: Int, body: String): String < Abort[BrainError] =
-    if status == 429 then
-      val (errorType, message) = extractError(body)
-      if errorType.contains("usage") || message.contains("usage") ||
-        message.contains("credit") || message.contains("quota")
-      then Abort.fail(BrainError.UsageLimit(s"Anthropic usage limit: $message"))
-      else Abort.fail(BrainError.RateLimit(s"Anthropic rate limit: $message"))
-    else if status != 200 then
+    if status == 429 then onTooMany(body)
+    else onHttp(status, body)
+
+  private def onHttp(status: Int, body: String): String < Abort[BrainError] =
+    if status != 200 then
       Abort.fail(BrainError.Unavailable(s"Anthropic API returned status $status"))
-    else
-      val rootOrError: Either[BrainError, com.fasterxml.jackson.databind.JsonNode] =
-        try Right(mapper.readTree(body))
-        catch
-          case e: Exception =>
-            Left(BrainError.Unavailable(s"Anthropic: invalid JSON response: ${e.getMessage}"))
-      rootOrError match
-        case Left(err) => Abort.fail(err)
-        case Right(root) =>
-          val content = root.path("content")
-          if content.isMissingNode || content.size() == 0 then
-            Abort.fail(BrainError.Unavailable("Anthropic response has no content"))
-          else
-            val text = (0 until content.size())
-              .map(i => content.get(i))
-              .filter(node => node.path("type").asText("") == "text")
-              .map(_.path("text").asText(""))
-              .mkString("")
-            if text.isEmpty then
-              Abort.fail(BrainError.Unavailable("Anthropic response has empty text"))
-            else text
+    else textFromBody(body)
+
+  private def onTooMany(body: String): String < Abort[BrainError] =
+    val (errorType, message) = extractError(body)
+    if isUsage(errorType, message) then
+      Abort.fail(BrainError.UsageLimit(s"Anthropic usage limit: $message"))
+    else Abort.fail(BrainError.RateLimit(s"Anthropic rate limit: $message"))
+
+  private def isUsage(errorType: String, message: String): Boolean =
+    hasUsage(errorType) || limitText(message)
+
+  private def limitText(message: String): Boolean =
+    hasUsage(message) || hasQuota(message)
+
+  private def hasUsage(text: String): Boolean =
+    text.contains("usage")
+
+  private def hasQuota(message: String): Boolean =
+    message.contains("credit") || message.contains("quota")
+
+  private def textFromBody(body: String): String < Abort[BrainError] =
+    readApiRoot(body) match
+      case Left(err)   => Abort.fail(err)
+      case Right(root) => textFromRoot(root)
+
+  private def readApiRoot(body: String): Either[BrainError, JsonNode] =
+    try Right(mapper.readTree(body))
+    catch
+      case e: Exception =>
+        Left(BrainError.Unavailable(s"Anthropic: invalid JSON response: ${e.getMessage}"))
+
+  private def textFromRoot(root: JsonNode): String < Abort[BrainError] =
+    val content = root.path("content")
+    if contentMissing(content) then
+      Abort.fail(BrainError.Unavailable("Anthropic response has no content"))
+    else joinText(content)
+
+  private def contentMissing(content: JsonNode): Boolean =
+    content.isMissingNode || content.size() == 0
+
+  private def joinText(content: JsonNode): String < Abort[BrainError] =
+    val text = (0 until content.size())
+      .map(i => content.get(i))
+      .filter(node => node.path("type").asText("") == "text")
+      .map(_.path("text").asText(""))
+      .mkString("")
+    if text.isEmpty then Abort.fail(BrainError.Unavailable("Anthropic response has empty text"))
+    else text
 
   private def extractError(body: String): (String, String) =
     try
