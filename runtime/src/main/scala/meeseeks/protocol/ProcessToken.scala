@@ -37,9 +37,10 @@ object TokenStore:
   /** An in-memory token store. Used by the server and in tests. */
   def inMemory(clock: Clock = Clock.system): TokenStore =
     new TokenStore:
+      // Guarded by synchronized: cluster replies can call verify from many threads.
       private var tokens = Map.empty[String, ProcessToken]
 
-      def issue(processId: String, ttlMillis: Long): ProcessToken =
+      def issue(processId: String, ttlMillis: Long): ProcessToken = synchronized:
         val token = ProcessToken(
           UUID.randomUUID().toString,
           processId,
@@ -49,7 +50,7 @@ object TokenStore:
         tokens = tokens + (token.id -> token)
         token
 
-      def verify(tokenId: String): Either[TokenError, ProcessToken] =
+      def verify(tokenId: String): Either[TokenError, ProcessToken] = synchronized:
         val now = Instant.ofEpochMilli(clock.currentTimeMillis())
         tokens.get(tokenId) match
           case None => Left(TokenError.NotFound)
