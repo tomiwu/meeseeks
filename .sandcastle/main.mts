@@ -4,6 +4,7 @@ import { run, claudeCode } from "@ai-hero/sandcastle";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
+import { retryOnce, retryOrBlock } from "./retry.mts";
 import { selectIssue, PRIO, type Issue } from "./pick.mts";
 
 const REPO = "tomiwu/meeseeks";
@@ -13,7 +14,9 @@ const MAX_ISSUES = Number(process.env.SANDCASTLE_MAX_ISSUES ?? "25");
 const DRY_RUN = Boolean(process.env.SANDCASTLE_DRY_RUN);
 
 // 60 s timeout, so a network stall cannot hang the loop.
-const gh = (...a: string[]) => execFileSync("gh", a, { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" }).trim();
+// Hard call: retry once, then BLOCKER and exit 2. Soft call: retry once, then throw (caller handles it).
+const gh = (...a: string[]) => retryOrBlock("gh", a);
+const ghSoft = (...a: string[]) => retryOnce("gh", a);
 const git = (...a: string[]) => execFileSync("git", a, { encoding: "utf8" }).trim();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const REQUIRED = ["format", "lint", "test (3.10.0)", "crap", "import-check"];
@@ -51,7 +54,7 @@ async function waitChecks(pr: number, branch: string, issue: number): Promise<"p
 function failedLog(branch: string): string {
   const runId = gh("run", "list", "-R", REPO, "--branch", branch, "--status", "failure", "--limit", "1", "--json", "databaseId", "--jq", ".[0].databaseId");
   if (!runId) return "No failed run log found.";
-  try { return gh("run", "view", runId, "-R", REPO, "--log-failed").slice(-20_000); } catch { return "Could not read the failed log."; }
+  try { return ghSoft("run", "view", runId, "-R", REPO, "--log-failed").slice(-20_000); } catch { return "Could not read the failed log."; }
 }
 
 // GitHub closes the issue a few seconds after the merge. Close it ourselves and wait,
@@ -60,7 +63,7 @@ async function closeIssue(n: number) {
   for (let i = 0; i < 12; i++) {
     const state = gh("issue", "view", String(n), "-R", REPO, "--json", "state", "--jq", ".state");
     if (state === "CLOSED") return;
-    if (i === 1) { try { gh("issue", "close", String(n), "-R", REPO, "--reason", "completed"); } catch { /* retry on next loop */ } }
+    if (i === 1) { try { ghSoft("issue", "close", String(n), "-R", REPO, "--reason", "completed"); } catch { /* retry on next loop */ } }
     await sleep(5_000);
   }
 }
@@ -174,12 +177,11 @@ async function mergeWhenCurrent(pr: number): Promise<"merged" | "fail"> {
   for (let i = 0; i < 5; i++) {
     const state = gh("pr", "view", String(pr), "-R", REPO, "--json", "mergeStateStatus", "--jq", ".mergeStateStatus");
     if (state === "BEHIND") {
-      try { gh("pr", "update-branch", String(pr), "-R", REPO); }
-      catch { console.log(`PR #${pr}: update-branch failed or timed out, retry once`); gh("pr", "update-branch", String(pr), "-R", REPO); }
+      gh("pr", "update-branch", String(pr), "-R", REPO);
       if ((await waitRequired(pr)) !== "pass") return "fail";
       continue;
     }
-    try { gh("pr", "merge", String(pr), "-R", REPO, "--squash", "--delete-branch"); return "merged"; }
+    try { ghSoft("pr", "merge", String(pr), "-R", REPO, "--squash", "--delete-branch"); return "merged"; }
     catch { await sleep(15_000); } // state can lag; check again
   }
   return "fail";
