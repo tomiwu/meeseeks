@@ -99,3 +99,17 @@ Grok Bot has no channel API. Use Telegram.
 ## Tests
 
 Run `sbt test`. The tests use fakes only. They do not call Telegram, Podman, or any model.
+
+## Remote worker (issue #67)
+
+A worker node runs on another machine. It joins the cluster with its own certificate, runs Podman there, and answers work requests. It stops itself after 60 s without server contact (FR8).
+
+Set these variables, then run `sbt "runtime/runMain meeseeks.runWorker"`:
+
+- `MEESEEKS_WORKER_HOST`, `MEESEEKS_WORKER_PORT`: address of the worker node.
+- `MEESEEKS_SERVER_HOST`, `MEESEEKS_SERVER_PORT`: address of the server (the seed node).
+- `MEESEEKS_TLS_KEYSTORE`, `MEESEEKS_TLS_TRUSTSTORE`: paths to the certificate files of the worker.
+- `MEESEEKS_TLS_PASSWORD`: password of both files. This is a secret. The worker never logs it.
+- `MEESEEKS_LEASE_SECONDS` (optional, default 60), `MEESEEKS_SANDBOX_IMAGE`, `MEESEEKS_TASK_DIR`.
+
+The server side uses `ClusterWorker.live` as its `Worker`. The server must use the same TLS settings (`clusterTlsConfig`) and the actor system name `meeseeks`. Turning on the cluster mode of the server Main is not part of this issue.

@@ -1,8 +1,21 @@
 package meeseeks.protocol
 
+import com.fasterxml.jackson.annotation.JsonSubTypes
+import com.fasterxml.jackson.annotation.JsonTypeInfo
 import meeseeks.CborSerializable
 
-/** A content unit in an A2A message. Types: TextPart, FilePart, DataPart. */
+/** A content unit in an A2A message. Types: TextPart, FilePart, DataPart.
+  *
+  * The type annotations let Jackson read the right subtype when a message crosses the network.
+  */
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "partType")
+@JsonSubTypes(
+  Array(
+    new JsonSubTypes.Type(value = classOf[TextPart], name = "text"),
+    new JsonSubTypes.Type(value = classOf[FilePart], name = "file"),
+    new JsonSubTypes.Type(value = classOf[DataPart], name = "data")
+  )
+)
 sealed trait Part extends CborSerializable
 
 /** A text content part. */
