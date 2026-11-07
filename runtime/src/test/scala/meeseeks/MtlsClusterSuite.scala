@@ -42,15 +42,18 @@ class MtlsClusterSuite extends munit.FunSuite:
       timeout: FiniteDuration
   ): Unit =
     val cluster = Cluster(system)
-    TestProbe[Any]()(using system).awaitAssert(
-      assert(
-        cluster.state.members.exists(m =>
-          m.address.port.contains(port) && m.status == MemberStatus.Up
+    val probe = TestProbe[Any]()(using system)
+    try
+      probe.awaitAssert(
+        assert(
+          cluster.state.members.exists(m =>
+            m.address.port.contains(port) && m.status == MemberStatus.Up
+          ),
+          s"member on port $port is not Up"
         ),
-        s"member on port $port is not Up"
-      ),
-      timeout
-    )
+        timeout
+      )
+    finally probe.stop()
 
   private def tlsConfig(
       port: Int,
