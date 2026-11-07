@@ -156,9 +156,13 @@ class FrustrationSuite extends munit.FunSuite:
       OracleVerdict.Fail("5"),
       OracleVerdict.Fail("6")
     )
+    val stuckMessages = new java.util.concurrent.LinkedBlockingQueue[String]()
     val resultProbe = kit.createTestProbe[String]()
     val task = Task("goal", TaskType.Build, "check")
-    val overseer = kit.spawn(Overseer("fr-kill-os-1"), "fr-kill-os-1")
+    val overseer = kit.spawn(
+      Overseer("fr-kill-os-1", notify = stuckMessages.put),
+      "fr-kill-os-1"
+    )
 
     val meeseeks = kit.spawn(
       Meeseeks(
@@ -174,8 +178,12 @@ class FrustrationSuite extends munit.FunSuite:
       "fr-kill-m-1"
     )
 
-    // Let the Meeseeks reach level 5.
-    Thread.sleep(500)
+    // Wait for the stuck report: proves the Meeseeks reached level 5.
+    assertNotEquals(
+      stuckMessages.poll(5, java.util.concurrent.TimeUnit.SECONDS),
+      null,
+      "expected a stuck report at level 5"
+    )
 
     // Upstream kill sends StopMeeseeks.
     overseer ! Overseer.Kill

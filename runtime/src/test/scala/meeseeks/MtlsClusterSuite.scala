@@ -3,6 +3,7 @@ package meeseeks
 import com.typesafe.config.ConfigFactory
 import meeseeks.cluster.WorkerLeaseMonitor
 import org.apache.pekko.actor.Address
+import org.apache.pekko.actor.testkit.typed.scaladsl.TestProbe
 import org.apache.pekko.actor.typed.*
 import org.apache.pekko.actor.typed.scaladsl.*
 import org.apache.pekko.cluster.MemberStatus
@@ -34,14 +35,22 @@ class MtlsClusterSuite extends munit.FunSuite:
     s.close()
     p
 
-  /** Poll until port appears as Up in cluster or the timeout passes. Each poll sleeps 200 ms. */
-  private def awaitMember(cluster: Cluster, port: Int, timeout: FiniteDuration): Unit =
-    val deadline = System.nanoTime() + timeout.toNanos
-    while (
-      !cluster.state.members.exists(m =>
-        m.address.port.contains(port) && m.status == MemberStatus.Up
-      ) && System.nanoTime() < deadline
-    ) Thread.sleep(200)
+  /** Wait with a Pekko probe until port appears as Up in the cluster, or fail at the timeout. */
+  private def awaitMember(
+      system: ActorSystem[?],
+      port: Int,
+      timeout: FiniteDuration
+  ): Unit =
+    val cluster = Cluster(system)
+    TestProbe[Any]()(using system).awaitAssert(
+      assert(
+        cluster.state.members.exists(m =>
+          m.address.port.contains(port) && m.status == MemberStatus.Up
+        ),
+        s"member on port $port is not Up"
+      ),
+      timeout
+    )
 
   private def tlsConfig(
       port: Int,
@@ -111,7 +120,7 @@ class MtlsClusterSuite extends munit.FunSuite:
     try
       // Wait for the worker to see the server as Up before checking the echo reply.
       // This decouples cluster-formation time from the echo exchange timeout.
-      awaitMember(Cluster(workerSys), sp, 60.seconds)
+      awaitMember(workerSys, sp, 60.seconds)
       val reply = Await.result(received.future, 30.seconds)
       assertEquals(reply, "pong:hello")
     finally
@@ -139,7 +148,7 @@ class MtlsClusterSuite extends munit.FunSuite:
 
     try
       // Allow time for a rogue connection attempt to fail.
-      Thread.sleep(5000)
+      TestProbe[Any]()(using serverSys).expectNoMessage(5.seconds)
       val serverCluster = Cluster(serverSys)
       val members = serverCluster.state.members
       // The rogue worker must not appear as an Up member on the server.
@@ -189,7 +198,7 @@ class MtlsClusterSuite extends munit.FunSuite:
 
     try
       // Wait until the worker sees the server as Up before cutting contact.
-      awaitMember(Cluster(workerSys), sp, 30.seconds)
+      awaitMember(workerSys, sp, 30.seconds)
 
       // Verify membership with a clear condition (awaitMember already guarantees this
       // unless the timeout passed, so the assert catches that case explicitly).

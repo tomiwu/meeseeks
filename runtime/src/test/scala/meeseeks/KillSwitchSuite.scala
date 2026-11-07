@@ -20,14 +20,6 @@ class KillSwitchSuite extends munit.FunSuite:
 
   override val munitTimeout: scala.concurrent.duration.Duration = 30.seconds
 
-  /** Brain that counts each call and blocks before always returning a failure. */
-  private final class SlowAlwaysFailBrain(callCount: AtomicInteger, delayMs: Long) extends Brain:
-    override def ask(prompt: String): String < (Sync & Abort[BrainError]) =
-      Sync.defer:
-        val _ = callCount.incrementAndGet()
-        Thread.sleep(delayMs)
-        Abort.fail(BrainError.Unavailable("slow always-fail brain"))
-
   /** Oracle that always returns Fail so the Meeseeks loop keeps running. */
   private object AlwaysFailOracle extends Oracle:
     override def judge(input: OracleInput): OracleVerdict < (Sync & Abort[OracleError]) =
@@ -36,7 +28,7 @@ class KillSwitchSuite extends munit.FunSuite:
   // AT1a + AT1b: kill stops both Meeseeks actors; no new brain calls after kill.
   test("AT1a-b: kill stops all workers; no new brain call starts after kill") {
     val callCount = new AtomicInteger(0)
-    val brain = SlowAlwaysFailBrain(callCount, 200L)
+    val brain = new SlowAlwaysFailBrain(callCount, 200L)
     val kit = ActorTestKit()
     val sink = kit.createTestProbe[String]()
 
@@ -84,9 +76,10 @@ class KillSwitchSuite extends munit.FunSuite:
     )
 
     // Wait for at least one brain call: proves the loop is running before kill.
-    val deadline = System.currentTimeMillis() + 5000L
-    while callCount.get() == 0 && System.currentTimeMillis() < deadline do Thread.sleep(50)
-    assert(callCount.get() > 0, "expected at least one brain call before kill")
+    assert(
+      brain.firstCall.await(5, TimeUnit.SECONDS),
+      "expected at least one brain call before kill"
+    )
 
     // Send the kill command.
     overseer ! Overseer.Kill
@@ -98,14 +91,6 @@ class KillSwitchSuite extends munit.FunSuite:
     // After both actors have stopped no new call can start.
     val countAfterKill = callCount.get()
 
-    // Wait longer than one brain step delay (200 ms); count must not rise.
-    Thread.sleep(500)
-    assertEquals(
-      callCount.get(),
-      countAfterKill,
-      "AT1a: 0 brain processes after kill — call count must not increase"
-    )
-
     // AT1a: overseer denies all new permits (no new iteration event).
     val permitProbe = kit.createTestProbe[Overseer.PermitResult]()
     overseer ! Overseer.AskPermit("after-kill-check", permitProbe.ref)
@@ -113,6 +98,13 @@ class KillSwitchSuite extends munit.FunSuite:
       permitProbe.receiveMessage(5.seconds),
       Overseer.Denied,
       "AT1a: overseer must deny all permits after kill"
+    )
+
+    // Both workers are stopped, so the call count must not rise.
+    assertEquals(
+      callCount.get(),
+      countAfterKill,
+      "AT1a: 0 brain processes after kill — call count must not increase"
     )
 
     kit.shutdownTestKit()

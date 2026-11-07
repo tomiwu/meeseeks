@@ -103,10 +103,7 @@ object Server:
 
       val counter = new AtomicInteger(0)
       val guardian = ctx.self
-      val _ = Thread
-        .ofVirtual()
-        .name("chat-poll")
-        .start(() => pollLoop(config, ctx.system, guardian, overseer, counter))
+      startPoll(config, ctx.system, guardian, overseer, counter)
 
       Behaviors.receiveMessage { case SpawnMeeseeks(id, task, parentId) =>
         spawnOne(id, task, parentId)
@@ -127,40 +124,79 @@ object Server:
       Behaviors.same
     }
 
-  private def pollLoop(
+  /** Result of one poll step: keep polling, retry after a delay, or stop. */
+  private enum PollNext:
+    case Again
+    case RetryAfter(delay: java.time.Duration)
+    case Halt
+
+  private val disconnectRetry = java.time.Duration.ofSeconds(5)
+  private val errorRetry = java.time.Duration.ofSeconds(1)
+
+  /** Run poll steps on a virtual thread. A retry is scheduled with the Pekko timer. */
+  private def startPoll(
       config: ServerConfig,
       system: ActorSystem[?],
       guardian: ActorRef[ServerCmd],
       overseer: ActorRef[Overseer.Command],
       counter: AtomicInteger
   ): Unit =
-    var running = true
-    while running && !system.whenTerminated.isCompleted do
-      try
-        import AllowUnsafe.embrace.danger
-        Sync.Unsafe
-          .evalOrThrow(Abort.run[ChatError](config.chat.receive()))
-          .fold(
-            msg =>
-              if msg.sender == config.ownerId then
-                handleOwner(msg.text, config.chat, guardian, overseer, counter)
-              else (),
-            {
-              case ChatError.Disconnected(reason) =>
-                System.err.println(s"[meeseeks] chat disconnected: $reason")
-                Thread.sleep(5000L)
-              case ChatError.Unauthorized(reason) =>
-                System.err.println(s"[meeseeks] chat unauthorized: $reason")
-                running = false
-            },
-            t =>
-              System.err.println(s"[meeseeks] unexpected poll error: ${t.getMessage}")
-              Thread.sleep(1000L)
-          )
-      catch
-        case t: Throwable =>
-          System.err.println(s"[meeseeks] poll exception: ${t.getMessage}")
-          Thread.sleep(1000L)
+    val _ = Thread
+      .ofVirtual()
+      .name("chat-poll")
+      .start(() => pollSteps(config, system, guardian, overseer, counter))
+
+  private def pollSteps(
+      config: ServerConfig,
+      system: ActorSystem[?],
+      guardian: ActorRef[ServerCmd],
+      overseer: ActorRef[Overseer.Command],
+      counter: AtomicInteger
+  ): Unit =
+    var next = PollNext.Again
+    while next == PollNext.Again && !system.whenTerminated.isCompleted do
+      next = pollOnce(config, guardian, overseer, counter)
+    next match
+      case PollNext.RetryAfter(delay) if !system.whenTerminated.isCompleted =>
+        val _ = system.scheduler.scheduleOnce(
+          delay,
+          () => startPoll(config, system, guardian, overseer, counter),
+          scala.concurrent.ExecutionContext.parasitic
+        )
+      case _ => ()
+
+  private def pollOnce(
+      config: ServerConfig,
+      guardian: ActorRef[ServerCmd],
+      overseer: ActorRef[Overseer.Command],
+      counter: AtomicInteger
+  ): PollNext =
+    try
+      import AllowUnsafe.embrace.danger
+      Sync.Unsafe
+        .evalOrThrow(Abort.run[ChatError](config.chat.receive()))
+        .fold(
+          msg =>
+            if msg.sender == config.ownerId then
+              handleOwner(msg.text, config.chat, guardian, overseer, counter)
+            PollNext.Again
+          ,
+          {
+            case ChatError.Disconnected(reason) =>
+              System.err.println(s"[meeseeks] chat disconnected: $reason")
+              PollNext.RetryAfter(disconnectRetry)
+            case ChatError.Unauthorized(reason) =>
+              System.err.println(s"[meeseeks] chat unauthorized: $reason")
+              PollNext.Halt
+          },
+          t =>
+            System.err.println(s"[meeseeks] unexpected poll error: ${t.getMessage}")
+            PollNext.RetryAfter(errorRetry)
+        )
+    catch
+      case t: Throwable =>
+        System.err.println(s"[meeseeks] poll exception: ${t.getMessage}")
+        PollNext.RetryAfter(errorRetry)
 
   private def handleOwner(
       text: String,

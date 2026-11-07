@@ -4,6 +4,7 @@ import kyo.*
 import meeseeks.port.Chat
 import meeseeks.port.ChatError
 import meeseeks.port.ChatMessage
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable
 
 /** In-memory Chat fake. Dequeues one message per receive call. Collects sent messages. */
@@ -11,8 +12,12 @@ final class FakeChat(
     incoming: mutable.Queue[Script[ChatError, ChatMessage]],
     val sent: mutable.ListBuffer[String]
 ) extends Chat:
+  /** Number of receive calls so far. Tests use it to see that the poll loop ran. */
+  val receiveCalls = new AtomicInteger(0)
+
   override def receive(): ChatMessage < (Sync & Abort[ChatError]) =
     Sync.defer:
+      val _ = receiveCalls.incrementAndGet()
       if incoming.isEmpty then Abort.fail(ChatError.Disconnected("no scripted messages remain"))
       else
         val step = incoming.dequeue()
