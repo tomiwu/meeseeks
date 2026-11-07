@@ -5,7 +5,7 @@ val h2V = "2.3.232"
 val munitV = "1.0.3"
 
 ThisBuild / scalaVersion := "3.10.0"
-ThisBuild / crossScalaVersions := Seq("3.10.0", "3.9.0")
+ThisBuild / crossScalaVersions := Seq("3.10.0")
 ThisBuild / organization := "io.meeseeks"
 
 ThisBuild / scalacOptions ++= Seq(

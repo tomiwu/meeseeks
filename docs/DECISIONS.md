@@ -91,3 +91,4 @@ Open items are marked OPEN. Nothing is invented.
 - Q36 closed (t70u): Tomasz says assume subscription backends are allowed for automated use. No terms research. Recorded as his assumption/risk.
 - Q26 closed (t73u): disk resolved; Podman uses overlay; 46% used, 70 GB free (2026-10-31 15:15). Open: F3 research copies, F4 cloud agents, F9 brain-in-container design.
 - t77u (go): F3 research copies = independent (different prompts, different brains when possible); F4 Cursor cloud agents excluded; F9 brain runs inside container, worker injects only that backend credential. Next: PRD, repo tomiwu/meeseeks, Matt Pocock issues skill, GitHub issues.
+- Q41 update (2026-11-06, Tomasz): Tests on Scala 3.10.0 passed, including the runtime suite. The language version is Scala 3.10.0 only. Do not build on Scala 3.9.0. Do not test on Scala 3.9.0. This note updates the Scala 3.9.0 fallback in Q41 (t67u). The t67u text stays as history.
