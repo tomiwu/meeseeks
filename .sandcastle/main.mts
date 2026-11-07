@@ -16,7 +16,7 @@ const DRY_RUN = Boolean(process.env.SANDCASTLE_DRY_RUN);
 const gh = (...a: string[]) => execFileSync("gh", a, { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" }).trim();
 const git = (...a: string[]) => execFileSync("git", a, { encoding: "utf8" }).trim();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const REQUIRED = ["format", "lint", "test (3.10.0)", "test (3.9.0)", "crap", "import-check"];
+const REQUIRED = ["format", "lint", "test (3.10.0)", "crap", "import-check"];
 
 const finished = new Set<number>(); // issues merged in this run; never pick them again
 

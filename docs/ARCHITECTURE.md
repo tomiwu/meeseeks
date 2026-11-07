@@ -6,7 +6,7 @@ Diagrams: `diagrams/`. Marks: OPEN = not decided. ASSUMPTION = Tomasz's assumpti
 
 ## One-page summary
 
-- **What:** a long-running Scala 3 server. Tomasz sends a task in chat. Each task has a goal and a check. A Meeseeks works until the check passes, sends one result message, and stops.
+- **What:** a long-running Scala 3.10.0 server. Tomasz sends a task in chat. Each task has a goal and a check. A Meeseeks works until the check passes, sends one result message, and stops.
 - **Chat:** a dedicated Grok bot first, Telegram fallback. T3 Code shows overview and sessions (connection is OPEN).
 - **Task types:** `build` (strict external check, run by the server in a fresh read-only container; tests come from a different Meeseeks) and `research` (several independent copies (different prompts, different brains when possible, no shared context), a blind judge, every claim has a verified source URL). A task with no check is refused.
 - **State:** Apache Pekko 1.7.1 Typed + Persistence + Cluster. The Pekko event journal is the ONLY store in v1 (H2 through pekko-persistence-jdbc). No Neo4j in v1. A graph read model (CQRS) can come later.
@@ -16,7 +16,7 @@ Diagrams: `diagrams/`. Marks: OPEN = not decided. ASSUMPTION = Tomasz's assumpti
 - **Frustration:** five levels. At level 5 a Meeseeks reports "stuck" to the overseer and keeps working. Only upstream (overseer, parent, Tomasz) or a high-confidence oracle "stop" ends it.
 - **Overseer:** does no task work. It shows the tree, controls permits, the breaker and restarts, owns stall detection with heartbeats, operates the kill switch.
 - **Backends:** pluggable brain and oracle backends: subscription login, API key, local model. Keys only through masked fields. Jev is an optional oracle, off by default.
-- **Build:** sbt 2.0 (one exact version pinned). Scala 3.10.0 first; CI tests 3.10.0 and 3.9.0; fallback 3.9.0 LTS. Newest stable versions first, always.
+- **Build:** sbt 2.0 (one exact version pinned). Scala 3.10.0 only. CI tests Scala 3.10.0 only. Newest stable versions first, always.
 - **Repo:** `tomiwu/meeseeks`, public, MIT, fan project. Code only, no knowledge. Modules `dev` and `runtime`; CI checks that `runtime` never imports `dev`. CI uses fakes only.
 - **Disk (Q26):** resolved (t73u). Podman uses the overlay driver; 46% used.
 
@@ -81,14 +81,14 @@ At level 5 the Meeseeks reports "stuck" to the overseer and keeps working. The o
 ## 6. Build, versions, repo, CI (Q2, Q16, Q17, Q33, Q34, Q41)
 
 - Build tool: sbt 2.0, one exact version pinned (2.0.0 or newer stable; confirm the newest). Replaces Scala CLI for this project.
-- Scala 3.10.0 first (Q41). RISK: Kyo RC7 was known on Scala 3.9 only; the test project must prove Kyo and Pekko on 3.10.0. CI tests 3.10.0 and 3.9.0. If Kyo or Pekko fail on 3.10.0, report the exact failure and fall back to 3.9.0 LTS.
+- Scala 3.10.0 only (Q41, update 2026-11-06). Tests on Scala 3.10.0 passed. Do not build on Scala 3.9.0. Do not test on Scala 3.9.0. See DECISIONS.md.
 - Rule: always try the newest stable versions first.
 - Pekko core 1.7.1 (actor-typed, persistence, cluster): all core modules on one version. pekko-persistence-jdbc 1.3.0 and pekko-projection 1.1.0 (later) have their own pinned versions; compatibility with core 1.7.1 is OPEN. JDK 25 Temurin; JDK 21 if JDK 25 fails in the test project.
 - crap4s defaults (munit, strict compiler flags) where they work on sbt.
 - Modules: `dev` and `runtime`. A CI check fails if `runtime` imports `dev`.
 - CI uses fakes only: no real brain, no real subscription, no real API key.
 - Repo `tomiwu/meeseeks`: public, MIT, fan project, code only.
-- First issue: test project (sbt 2.0, Scala 3.10.0/3.9.0, pinned Kyo, Pekko 1.7.1, H2 journal, 2-node cluster on one machine, all CI jobs).
+- First issue: test project (sbt 2.0, Scala 3.10.0, pinned Kyo, Pekko 1.7.1, H2 journal, 2-node cluster on one machine, all CI jobs).
 
 ## 7. Diagrams
 
@@ -109,17 +109,17 @@ At level 5 the Meeseeks reports "stuck" to the overseer and keeps working. The o
 6. Obsidian vault location.
 7. A2A research for our protocol.
 8. crap4s on sbt 2.0.
-9. Kyo and Pekko on Scala 3.10.0.
-10. H2 journal support in pekko-persistence-jdbc.
-11. JDK 25 with Pekko 1.7.1.
-12. Research copies count and claim extraction quality; mutation testing tool on sbt 2.0.
-13. Replace the own 60 s lease with the cluster failure detector (decide after the test project).
-14. Exact sbt 2.0 version to pin.
-15. pekko-persistence-jdbc 1.3.0 and pekko-projection 1.1.0 compatibility with Pekko core 1.7.1.
+9. H2 journal support in pekko-persistence-jdbc.
+10. JDK 25 with Pekko 1.7.1.
+11. Research copies count and claim extraction quality; mutation testing tool on sbt 2.0.
+12. Replace the own 60 s lease with the cluster failure detector (decide after the test project).
+13. Exact sbt 2.0 version to pin.
+14. pekko-persistence-jdbc 1.3.0 and pekko-projection 1.1.0 compatibility with Pekko core 1.7.1.
 
-## 9. Decided (t73u, t77u)
+## 9. Decided (t73u, t77u, 2026-11-06)
 
 - Research copies are independent: different prompts, different brains when possible, no shared context (t77u, replaces "identical" in t45u).
 - Cursor cloud agents are excluded. Remote workers join the Pekko Cluster (t77u).
 - The brain runs inside the Podman container. The worker injects only that backend's credential at start (t77u).
 - Disk blocker Q26 is resolved: 46% used, Podman uses overlay (t73u).
+- Scala 3.10.0 is the only language version (Tomasz, 2026-11-06). Kyo and Pekko pass on Scala 3.10.0. This closes former open item 9. See DECISIONS.md (Q41 update).

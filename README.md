@@ -4,7 +4,7 @@ A task bot. You give it a task with a goal and a check. A Meeseeks works until t
 
 Status: design approved; no code yet. See [docs/PRD.md](docs/PRD.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Stack: Scala 3, sbt 2.0, Apache Pekko (typed, persistence, cluster), Kyo, Podman.
+Stack: Scala 3.10.0, sbt 2.0, Apache Pekko (typed, persistence, cluster), Kyo, Podman.
 
 ## Fan project
 

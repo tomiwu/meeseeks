@@ -70,7 +70,7 @@ Tomasz has many small tasks that an AI agent can do. Today he must start each ag
 
 ## 7. Non-functional requirements
 
-- NFR1. Language: Scala 3.10.0 first, CI also on 3.9.0 LTS; fallback 3.9.0.
+- NFR1. Language: Scala 3.10.0 only. CI tests Scala 3.10.0 only.
 - NFR2. Build: sbt 2.0, one exact version pinned (newest stable at start: 2.0.12). JDK 25 Temurin; JDK 21 if 25 fails.
 - NFR3. Newest stable versions first, always. Pin exact versions.
 - NFR4. Pekko 1.7.1 core modules on one version; Kyo pinned to one exact version (1.0.0-RC7 at start).
@@ -137,7 +137,7 @@ Chat -> gateway -> `Task` -> Meeseeks actor -> permit from overseer -> Kyo step 
 | Q38 | Research Pekko and Kyo together (done) |
 | Q39 | Pekko for state and cluster, Kyo inside steps |
 | Q40 | No Neo4j in v1; journal is the only store |
-| Q41 | Newest versions first; Scala 3.10.0, fallback 3.9.0 |
+| Q41 | Newest versions first; Scala 3.10.0 only (update 2026-11-06) |
 | t31u..t36u | Round 2 and 3 answers (Q10..Q23) |
 | t42u..t46u | Permits, breaker, disk gate, task types |
 | t49u..t53u | Authentication, Jev, API keys allowed, Q28 |
@@ -149,7 +149,6 @@ Chat -> gateway -> `Task` -> Meeseeks actor -> permit from overseer -> Kyo step 
 
 ## 11. Risks
 
-- Kyo 1.0.0-RC7 and Pekko on Scala 3.10.0 are not proven.
 - pekko-persistence-jdbc 1.3.0 and H2 with Pekko core 1.7.1 are not proven.
 - crap4s rules and a mutation testing tool on sbt 2.0 are not proven.
 - JDK 25 with Pekko 1.7.1 is not proven.
@@ -159,7 +158,7 @@ Chat -> gateway -> `Task` -> Meeseeks actor -> permit from overseer -> Kyo step 
 
 ## 12. Open items
 
-See [ARCHITECTURE.md section 8](ARCHITECTURE.md#8-open-items): T3 Code connection, Grok bot channel API, private network, Split Brain Resolver strategy, names and limits of frustration levels, vault location, A2A research, crap4s on sbt 2.0, Kyo and Pekko on 3.10.0, H2 journal, JDK 25, research copy count and claim extraction, cluster failure detector versus own lease, exact sbt pin, Pekko module compatibility.
+See [ARCHITECTURE.md section 8](ARCHITECTURE.md#8-open-items): T3 Code connection, Grok bot channel API, private network, Split Brain Resolver strategy, names and limits of frustration levels, vault location, A2A research, crap4s on sbt 2.0, H2 journal, JDK 25, research copy count and claim extraction, cluster failure detector versus own lease, exact sbt pin, Pekko module compatibility.
 
 ## 13. Acceptance tests
 
@@ -176,7 +175,7 @@ See [ARCHITECTURE.md section 8](ARCHITECTURE.md#8-open-items): T3 Code connectio
 
 ## 14. Milestones
 
-1. M0 Test project: sbt 2.0, Scala 3.10.0/3.9.0, Kyo, Pekko, H2 journal, 2-node cluster, CI.
+1. M0 Test project: sbt 2.0, Scala 3.10.0, Kyo, Pekko, H2 journal, 2-node cluster, CI.
 2. M1 Core: modules, fakes, task model, gateway, Meeseeks actor, overseer, journal.
 3. M2 Work: Kyo adapter, Podman sandbox, build check, frustration, children.
 4. M3 Research and oracles: research flow, backends, Jev.
